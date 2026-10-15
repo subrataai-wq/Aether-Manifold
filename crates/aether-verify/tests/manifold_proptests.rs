@@ -29,7 +29,11 @@ use aether_manifold::{
 use proptest::prelude::*;
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(5000))]
+    #![proptest_config(ProptestConfig {
+        cases: 10000,
+        failure_persistence: None,
+        .. ProptestConfig::default()
+    })]
 
     /// 3.1: Verifies that for any generated point x in H_kappa^d,
     /// the Lorentzian inner product satisfies |<x, x>_L - 1/kappa| within float32 precision.
