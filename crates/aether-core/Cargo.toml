@@ -1,0 +1,22 @@
+[package]
+name = "aether-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+bytemuck = { workspace = true }
+zerocopy = { workspace = true }
+static_assertions = { workspace = true }
+thiserror = { workspace = true }
+crc32fast = { workspace = true }
+dyn-stack = { workspace = true }
+loom = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true
+

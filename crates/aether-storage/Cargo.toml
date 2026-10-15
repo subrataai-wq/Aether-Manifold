@@ -1,0 +1,23 @@
+[package]
+name = "aether-storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+aether-core = { workspace = true }
+aether-manifold = { workspace = true }
+crossbeam-utils = { workspace = true }
+portable-atomic = { workspace = true }
+bumpalo = { workspace = true }
+crc32fast = { workspace = true }
+xxhash-rust = { workspace = true }
+static_assertions = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = { workspace = true }
+
+[lints]
+workspace = true
+

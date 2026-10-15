@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a84762b3808c0ec3724c746e93c796b18d1d6149448267248b0d46032581f89e # shrinks to spatial = [91.50606, 0.0], kappa = -2.7206042
+cc 1c08abe4ee4ed98fdb89064fcaea4fca9f3c9f24d2af2679119efea1a5b3bfc2 # shrinks to spatial = [49.026886, 0.0], kappa = -2.6797678, drift = 0.0
+cc fd61033e69d41456945e62fc1f7f1cc2ad790e2a977f0169bb9a87d1491caf7b # shrinks to h_spatial_u = [0.0, 0.0, 0.0], h_spatial_v = [0.0, 0.0, 0.0], s_raw_u = [8.374327, -2.0095167, -4.621772], s_raw_v = [0.0, 0.0, 0.0], e_u = [0.0, 0.0], e_v = [0.0, 0.0]
