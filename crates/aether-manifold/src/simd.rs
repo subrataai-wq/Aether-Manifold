@@ -256,6 +256,62 @@ pub fn simd_sum_of_squares(a: &[f32]) -> f32 {
     arch.dispatch(SumOfSquaresKernel { a })
 }
 
+/// SIMD AXPY kernel: $y \leftarrow y + \alpha x$ with 4x unrolled register operations.
+struct AxpyKernel<'a> {
+    alpha: f32,
+    x: &'a [f32],
+    y: &'a mut [f32],
+}
+
+impl<'a> WithSimd for AxpyKernel<'a> {
+    type Output = ();
+
+    #[inline(always)]
+    fn with_simd<S: Simd>(self, simd: S) -> Self::Output {
+        let (head_x, tail_x) = S::as_simd_f32s(self.x);
+        let (head_y, tail_y) = S::as_mut_simd_f32s(self.y);
+
+        if head_x.len() == head_y.len() && !head_x.is_empty() {
+            let alpha_simd = simd.splat_f32s(self.alpha);
+            let (x_quads, x_rem) = pulp::as_arrays::<4, S::f32s>(head_x);
+            let (y_quads, y_rem) = pulp::as_arrays_mut::<4, S::f32s>(head_y);
+
+            for (qx, qy) in x_quads.iter().zip(y_quads.iter_mut()) {
+                qy[0] = simd.mul_add_f32s(alpha_simd, qx[0], qy[0]);
+                qy[1] = simd.mul_add_f32s(alpha_simd, qx[1], qy[1]);
+                qy[2] = simd.mul_add_f32s(alpha_simd, qx[2], qy[2]);
+                qy[3] = simd.mul_add_f32s(alpha_simd, qx[3], qy[3]);
+            }
+            for (&rx, ry) in x_rem.iter().zip(y_rem.iter_mut()) {
+                *ry = simd.mul_add_f32s(alpha_simd, rx, *ry);
+            }
+            for (&x_elem, y_elem) in tail_x.iter().zip(tail_y.iter_mut()) {
+                *y_elem += self.alpha * x_elem;
+            }
+        } else {
+            let (x_chunks, x_rem) = pulp::as_arrays::<4, f32>(self.x);
+            let (y_chunks, y_rem) = pulp::as_arrays_mut::<4, f32>(self.y);
+
+            for (cx, cy) in x_chunks.iter().zip(y_chunks.iter_mut()) {
+                cy[0] += self.alpha * cx[0];
+                cy[1] += self.alpha * cx[1];
+                cy[2] += self.alpha * cx[2];
+                cy[3] += self.alpha * cx[3];
+            }
+            for (&x_elem, y_elem) in x_rem.iter().zip(y_rem.iter_mut()) {
+                *y_elem += self.alpha * x_elem;
+            }
+        }
+    }
+}
+
+/// Compute in-place AXPY $y \leftarrow y + \alpha x$ using runtime SIMD dispatch with 4x unrolling.
+#[inline]
+pub fn simd_axpy(alpha: f32, x: &[f32], y: &mut [f32]) {
+    let arch = Arch::new();
+    arch.dispatch(AxpyKernel { alpha, x, y });
+}
+
 /// Pure scalar reference implementation of dot product for verification.
 #[inline]
 pub fn scalar_dot_product(a: &[f32], b: &[f32]) -> f32 {

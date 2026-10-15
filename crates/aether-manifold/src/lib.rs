@@ -16,9 +16,15 @@
 
 pub mod euclidean;
 pub mod hyperbolic;
+pub mod optimal_transport;
 pub mod product;
 pub mod simd;
 pub mod spherical;
+
+pub use optimal_transport::{
+    debiased_sinkhorn_divergence, sinkhorn_knopp, sinkhorn_knopp_with_workspace,
+    sinkhorn_workspace_size, SinkhornConfig, SinkhornResult, LOG_DOMAIN_EPSILON_THRESHOLD,
+};
 
 pub use euclidean::{
     euclidean_distance, euclidean_distance_squared, euclidean_dot_product,
@@ -37,7 +43,7 @@ pub use product::{
 };
 pub use simd::{
     scalar_dot_product, scalar_euclidean_distance_squared, scalar_sum_of_squares,
-    simd_dot_product, simd_euclidean_distance_squared, simd_sum_of_squares,
+    simd_axpy, simd_dot_product, simd_euclidean_distance_squared, simd_sum_of_squares,
 };
 pub use spherical::{
     scalar_spherical_distance, scalar_spherical_normalize, spherical_distance,
