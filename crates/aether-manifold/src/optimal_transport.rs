@@ -138,9 +138,9 @@ pub fn sinkhorn_knopp_with_workspace(
     let (k_mat, rest) = rest.split_at_mut(nm);
     let (u_vec, rest) = rest.split_at_mut(n);
     let (v_vec, rest) = rest.split_at_mut(m);
-    let (kv_buf, ktu_buf) = rest.split_at_mut(n);
+    let (kv_buf, rest) = rest.split_at_mut(n);
+    let (ktu_buf, _unused) = rest.split_at_mut(m);
 
-    // 1. Compute Cost Matrix C_ij = ||a_i - b_j||_2^2 using 4x unrolled SIMD
     // 1. Compute Cost Matrix C_ij = ||a_i - b_j||_2^2 using 4x unrolled SIMD
     let mut min_cost = f32::INFINITY;
     let mut max_cost = 0.0f32;
@@ -193,7 +193,7 @@ pub fn sinkhorn_knopp_with_workspace(
     let mut iterations = 0;
     let mut converged = false;
     let mut err_u = 1.0f32;
-    let err_v = 0.0f32;
+    let mut err_v = 1.0f32;
 
     for iter in 0..config.max_iter {
         iterations = iter + 1;
@@ -214,15 +214,6 @@ pub fn sinkhorn_knopp_with_workspace(
                     let row_sum = u_val * kv;
                     current_err_u += (row_sum - mu_i).abs();
                 }
-            }
-        }
-
-        // Check convergence on true row marginal
-        if iter > 0 {
-            err_u = current_err_u;
-            if err_u <= config.tolerance {
-                converged = true;
-                break;
             }
         }
 
@@ -248,8 +239,24 @@ pub fn sinkhorn_knopp_with_workspace(
             };
             simd_axpy(u_val, k_row, ktu_buf);
         }
+
+        // Compute column marginal error ||P^T 1_n - nu||_1 and update v_j
+        let mut current_err_v = 0.0f32;
         for (v_ref, &sum) in v_vec.iter_mut().zip(ktu_buf.iter()) {
+            let col_sum = *v_ref * sum;
+            current_err_v += (col_sum - nu_j).abs();
             *v_ref = if sum > f32::MIN_POSITIVE { nu_j / sum } else { 0.0 };
+        }
+
+        if iter > 0 {
+            err_u = current_err_u;
+            err_v = current_err_v;
+            if err_u <= config.tolerance && err_v <= config.tolerance {
+                converged = true;
+                break;
+            }
+        } else {
+            err_v = current_err_v;
         }
     }
 
@@ -468,6 +475,63 @@ pub fn sinkhorn_knopp(
     sinkhorn_knopp_with_workspace(a_bag, n, b_bag, m, dim, config, &mut workspace)
 }
 
+/// Compute Debiased Sinkhorn Divergence $S_{\varepsilon}(A, B)$ with zero heap allocations
+/// using a pre-allocated workspace of size `sinkhorn_workspace_size(n.max(m), n.max(m))`:
+///
+/// $$S_{\varepsilon}(A, B) = \mathcal{W}_{\varepsilon}(A, B) - \frac{1}{2}\left(\mathcal{W}_{\varepsilon}(A, A) + \mathcal{W}_{\varepsilon}(B, B)\right)$$
+///
+/// # Workspace Requirements
+/// The caller must provide a pre-allocated `workspace` slice with length of at least:
+/// $$\text{req} = \text{sinkhorn\_workspace\_size}(\max(n, m), \max(n, m)) = 2\max(n, m)^2 + 4\max(n, m)$$
+///
+/// Guaranteed Properties:
+/// 1. Non-negativity: $S_{\varepsilon}(A, B) \ge 0$.
+/// 2. Identity of indiscernibles: $S_{\varepsilon}(A, A) = 0$.
+/// 3. Symmetry: $S_{\varepsilon}(A, B) = S_{\varepsilon}(B, A)$.
+/// 4. Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
+pub fn debiased_sinkhorn_divergence_with_workspace(
+    a_bag: &[f32],
+    n: usize,
+    b_bag: &[f32],
+    m: usize,
+    dim: usize,
+    config: &SinkhornConfig,
+    workspace: &mut [f32],
+) -> Result<f32, AetherError> {
+    if a_bag.len() < n * dim {
+        return Err(AetherError::InvalidBufferSize {
+            actual: a_bag.len(),
+            expected: n * dim,
+        });
+    }
+    if b_bag.len() < m * dim {
+        return Err(AetherError::InvalidBufferSize {
+            actual: b_bag.len(),
+            expected: m * dim,
+        });
+    }
+
+    if core::ptr::eq(a_bag, b_bag) && n == m {
+        return Ok(0.0);
+    }
+
+    let max_k = n.max(m);
+    let required_len = sinkhorn_workspace_size(max_k, max_k);
+    if workspace.len() < required_len {
+        return Err(AetherError::ScratchpadExhausted {
+            requested: required_len * core::mem::size_of::<f32>(),
+            available: core::mem::size_of_val(workspace),
+        });
+    }
+
+    let w_ab = sinkhorn_knopp_with_workspace(a_bag, n, b_bag, m, dim, config, workspace)?;
+    let w_aa = sinkhorn_knopp_with_workspace(a_bag, n, a_bag, n, dim, config, workspace)?;
+    let w_bb = sinkhorn_knopp_with_workspace(b_bag, m, b_bag, m, dim, config, workspace)?;
+
+    let debiased = w_ab.regularized_cost - 0.5 * (w_aa.regularized_cost + w_bb.regularized_cost);
+    Ok(if debiased < 0.0 { 0.0 } else { debiased })
+}
+
 /// Compute the Debiased Sinkhorn Divergence $S_{\varepsilon}(A, B)$ between two multi-vector bags:
 /// $$S_{\varepsilon}(A, B) = \mathcal{W}_{\varepsilon}(A, B) - \frac{1}{2}\mathcal{W}_{\varepsilon}(A, A) - \frac{1}{2}\mathcal{W}_{\varepsilon}(B, B)$$
 ///
@@ -487,11 +551,8 @@ pub fn debiased_sinkhorn_divergence(
         return Ok(0.0);
     }
 
-    let w_ab = sinkhorn_knopp(a_bag, n, b_bag, m, dim, config)?;
-    let w_aa = sinkhorn_knopp(a_bag, n, a_bag, n, dim, config)?;
-    let w_bb = sinkhorn_knopp(b_bag, m, b_bag, m, dim, config)?;
-
-    let debiased = w_ab.regularized_cost - 0.5 * (w_aa.regularized_cost + w_bb.regularized_cost);
-    // Non-negativity clamp on numerical float residue
-    Ok(if debiased < 0.0 { 0.0 } else { debiased })
+    let max_k = n.max(m);
+    let req = sinkhorn_workspace_size(max_k, max_k);
+    let mut workspace = vec![0.0f32; req];
+    debiased_sinkhorn_divergence_with_workspace(a_bag, n, b_bag, m, dim, config, &mut workspace)
 }

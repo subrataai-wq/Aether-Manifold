@@ -308,6 +308,15 @@ impl<'a> WithSimd for AxpyKernel<'a> {
 /// Compute in-place AXPY $y \leftarrow y + \alpha x$ using runtime SIMD dispatch with 4x unrolling.
 #[inline]
 pub fn simd_axpy(alpha: f32, x: &[f32], y: &mut [f32]) {
+    let len = x.len().min(y.len());
+    let x = match x.get(..len) {
+        Some(s) => s,
+        None => return,
+    };
+    let y = match y.get_mut(..len) {
+        Some(s) => s,
+        None => return,
+    };
     let arch = Arch::new();
     arch.dispatch(AxpyKernel { alpha, x, y });
 }

@@ -22,8 +22,9 @@ pub mod simd;
 pub mod spherical;
 
 pub use optimal_transport::{
-    debiased_sinkhorn_divergence, sinkhorn_knopp, sinkhorn_knopp_with_workspace,
-    sinkhorn_workspace_size, SinkhornConfig, SinkhornResult, LOG_DOMAIN_EPSILON_THRESHOLD,
+    debiased_sinkhorn_divergence, debiased_sinkhorn_divergence_with_workspace, sinkhorn_knopp,
+    sinkhorn_knopp_with_workspace, sinkhorn_workspace_size, SinkhornConfig, SinkhornResult,
+    LOG_DOMAIN_EPSILON_THRESHOLD,
 };
 
 pub use euclidean::{

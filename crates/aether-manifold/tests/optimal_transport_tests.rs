@@ -15,8 +15,8 @@
 use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard, TrackingAllocator};
 use aether_core::error::AetherError;
 use aether_manifold::{
-    debiased_sinkhorn_divergence, sinkhorn_knopp, sinkhorn_knopp_with_workspace,
-    sinkhorn_workspace_size, SinkhornConfig,
+    debiased_sinkhorn_divergence, debiased_sinkhorn_divergence_with_workspace, sinkhorn_knopp,
+    sinkhorn_knopp_with_workspace, sinkhorn_workspace_size, SinkhornConfig,
 };
 
 #[global_allocator]
@@ -62,6 +62,50 @@ fn gate_zero_hot_path_allocations_on_sinkhorn() {
         );
         assert!(guard.assert_zero_allocations().is_ok());
         assert!(res.cost > 0.0);
+    }
+}
+
+#[test]
+fn gate_zero_hot_path_allocations_on_debiased_sinkhorn() {
+    let n = 4;
+    let m = 3;
+    let dim = 8;
+
+    let a_bag = [1.0f32; 32]; // 4 * 8
+    let b_bag = [2.0f32; 24]; // 3 * 8
+
+    let max_k = n.max(m);
+    let req_size = sinkhorn_workspace_size(max_k, max_k);
+    let mut workspace = vec![0.0f32; req_size];
+
+    let config = SinkhornConfig {
+        epsilon: 0.1,
+        max_iter: 50,
+        tolerance: 1e-4,
+    };
+
+    reset_hot_path_counters();
+    {
+        let guard = HotPathAllocGuard::enter();
+
+        let s_ab = debiased_sinkhorn_divergence_with_workspace(
+            &a_bag,
+            n,
+            &b_bag,
+            m,
+            dim,
+            &config,
+            &mut workspace,
+        )
+        .unwrap();
+
+        assert_eq!(
+            guard.alloc_count(),
+            0,
+            "Debiased Sinkhorn divergence triggered hot-path heap allocations!"
+        );
+        assert!(guard.assert_zero_allocations().is_ok());
+        assert!(s_ab > 0.0);
     }
 }
 
@@ -213,5 +257,31 @@ fn test_sinkhorn_error_handling() {
         sinkhorn_knopp_with_workspace(&a_bag, 2, &b_bag, 2, 4, &ok_config, &mut tiny_workspace),
         Err(AetherError::ScratchpadExhausted { .. })
     ));
+}
+
+#[test]
+fn test_asymmetric_cardinality_identical_points_divergence_is_zero() {
+    let n = 4;
+    let m = 2;
+    let dim = 2;
+    let a_bag = [1.0f32, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0];
+    let b_bag = [1.0f32, 0.0, 1.0, 0.0];
+
+    let config = SinkhornConfig {
+        epsilon: 1.0,
+        max_iter: 50,
+        tolerance: 1e-4,
+    };
+
+    let s_ab = debiased_sinkhorn_divergence(&a_bag, n, &b_bag, m, dim, &config).unwrap();
+    let s_ba = debiased_sinkhorn_divergence(&b_bag, m, &a_bag, n, dim, &config).unwrap();
+    assert!(s_ab < 1e-5, "s_ab must be 0 for identical points: {}", s_ab);
+    assert!(s_ba < 1e-5, "s_ba must be 0 for identical points: {}", s_ba);
+    assert!(
+        (s_ab - s_ba).abs() < 1e-5,
+        "Symmetry must hold: |{} - {}| < 1e-5",
+        s_ab,
+        s_ba
+    );
 }
 
