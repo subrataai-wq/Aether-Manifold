@@ -15,6 +15,7 @@ proptest = { workspace = true }
 loom = { workspace = true }
 oorandom = { workspace = true }
 static_assertions = { workspace = true }
+bytemuck = { workspace = true }
 
 [lints]
 workspace = true

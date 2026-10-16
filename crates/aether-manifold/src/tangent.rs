@@ -107,14 +107,22 @@ pub fn lorentz_exp_map(
     let v_norm = libm::sqrtf(if v_norm_sq > 0.0 { v_norm_sq } else { 0.0 });
     let theta = beta * v_norm;
 
-    let (coef_x, coef_v) = if theta < 1e-4 {
-        let t2 = theta * theta;
+    // Horizon clamp: theta > 85.0 exceeds maximum representable radius in IEEE-754 f32
+    let max_theta = 85.0f32;
+    let (eff_theta, scale_factor) = if theta > max_theta {
+        (max_theta, max_theta / theta)
+    } else {
+        (theta, 1.0)
+    };
+
+    let (coef_x, coef_v) = if eff_theta < 1e-4 {
+        let t2 = eff_theta * eff_theta;
         let t4 = t2 * t2;
         let c_x = 1.0 + 0.5 * t2 + (1.0 / 24.0) * t4;
         let c_v = 1.0 + (1.0 / 6.0) * t2 + (1.0 / 120.0) * t4;
         (c_x, c_v)
     } else {
-        (libm::coshf(theta), libm::sinhf(theta) / theta)
+        (libm::coshf(eff_theta), libm::sinhf(eff_theta) / eff_theta)
     };
 
     for i in 0..base.len() {
@@ -123,7 +131,12 @@ pub fn lorentz_exp_map(
             base.get(i),
             tangent.get(i),
         ) {
-            *out_ref = coef_x * b_val + coef_v * t_val;
+            let val = coef_x * b_val + coef_v * (t_val * scale_factor);
+            *out_ref = if val.is_nan() {
+                0.0
+            } else {
+                val.clamp(-1e18, 1e18)
+            };
         }
     }
 
@@ -179,6 +192,8 @@ pub fn lorentz_log_map(
         let d2 = delta * delta;
         let d3 = d2 * delta;
         1.0 - (1.0 / 3.0) * delta + (2.0 / 15.0) * d2 - (3.0 / 35.0) * d3
+    } else if z > 1e18 {
+        libm::logf(2.0 * z) / z
     } else {
         let acosh_z = libm::acoshf(z);
         let denom = libm::sqrtf(z * z - 1.0);
@@ -195,7 +210,8 @@ pub fn lorentz_log_map(
             target.get(i),
             base.get(i),
         ) {
-            *out_ref = coef * (t_val - z * b_val);
+            let val = coef * (t_val - z * b_val);
+            *out_ref = if val.is_nan() { 0.0 } else { val };
         }
     }
     Ok(())

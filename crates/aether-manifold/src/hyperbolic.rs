@@ -128,10 +128,17 @@ pub fn lorentz_reproject(point: &mut [f32], kappa: f32) -> Result<(), AetherErro
             expected: 2,
         });
     }
-    let spatial = match point.get(1..) {
+    let spatial = match point.get_mut(1..) {
         Some(s) => s,
-        None => &[],
+        None => return Ok(()),
     };
+    for x in spatial.iter_mut() {
+        if x.is_nan() {
+            *x = 0.0;
+        } else {
+            *x = (*x).clamp(-1e18, 1e18);
+        }
+    }
     let new_x0 = lorentz_compute_x0(spatial, kappa)?;
     if let Some(x0_ref) = point.first_mut() {
         *x0_ref = new_x0;

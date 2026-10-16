@@ -79,6 +79,7 @@ dependencies = [
  "aether-manifold",
  "aether-query",
  "aether-storage",
+ "bytemuck",
  "loom",
  "oorandom",
  "proptest",

@@ -51,7 +51,6 @@ aether-manifold = { path = "crates/aether-manifold" }
 aether-storage = { path = "crates/aether-storage" }
 aether-query = { path = "crates/aether-query" }
 aether-consensus = { path = "crates/aether-consensus" }
-aether-verify = { path = "crates/aether-verify" }
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
