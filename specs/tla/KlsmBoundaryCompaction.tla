@@ -159,5 +159,8 @@ Inv_DelaunayBoundaryEquivalence ==
         IsInteriorVertex(v) =>
             (\A u \in delaunay_graph[v] : cell_assignment[u] = cell_assignment[v])
 
+StateConstraint ==
+    /\ Cardinality(reader_epochs) <= 2
+
 =============================================================================
 

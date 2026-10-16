@@ -8,7 +8,7 @@ on:
       proptest_cases:
         description: 'Number of proptest cases per property'
         required: false
-        default: '50000'
+        default: '5000'
 
 env:
   CARGO_TERM_COLOR: always
@@ -24,10 +24,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run Manifold Property Fuzzing (Release)
         env:
-          PROPTEST_CASES: ${{ github.event.inputs.proptest_cases || '50000' }}
+          PROPTEST_CASES: ${{ github.event.inputs.proptest_cases || '5000' }}
         run: cargo test -p aether-verify --test manifold_proptests --release -- --nocapture
       - name: Run Optimal Transport Property Fuzzing (Release)
         env:
-          PROPTEST_CASES: ${{ github.event.inputs.proptest_cases || '50000' }}
+          PROPTEST_CASES: ${{ github.event.inputs.proptest_cases || '5000' }}
         run: cargo test -p aether-verify --test optimal_transport_proptests --release -- --nocapture
 

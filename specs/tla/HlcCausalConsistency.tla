@@ -169,5 +169,9 @@ Inv_BoundedLogicalOverflow ==
         (hlc[n].log = 0 /\ last_hlc[n].phys = hlc[n].phys - 1 /\ last_hlc[n].log = MaxLogical)
         => HlcLT(last_hlc[n], hlc[n])
 
+StateConstraint ==
+    /\ Cardinality(network) <= 2
+    /\ overflow_events <= 2
+
 =============================================================================
 

@@ -80,11 +80,13 @@ jobs:
         run: |
           curl -L -o tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
       - name: Run TLC Model Checker on HLC Causal Consistency
+        working-directory: specs/tla
         run: |
-          java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC specs/tla/HlcCausalConsistency.tla -config specs/tla/HlcCausalConsistency.cfg -workers auto
+          java -XX:+UseParallelGC -cp "$GITHUB_WORKSPACE/tla2tools.jar:." tlc2.TLC HlcCausalConsistency.tla -config HlcCausalConsistency.cfg -workers auto
       - name: Run TLC Model Checker on KLSM Boundary Compaction
+        working-directory: specs/tla
         run: |
-          java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC specs/tla/KlsmBoundaryCompaction.tla -config specs/tla/KlsmBoundaryCompaction.cfg -workers auto
+          java -XX:+UseParallelGC -cp "$GITHUB_WORKSPACE/tla2tools.jar:." tlc2.TLC KlsmBoundaryCompaction.tla -config KlsmBoundaryCompaction.cfg -workers auto
       - name: Run Rust TLA+ State Machine Protocol Invariant Tests
         run: cargo test -p aether-verify --test tla_protocol_invariants -- --nocapture
 
