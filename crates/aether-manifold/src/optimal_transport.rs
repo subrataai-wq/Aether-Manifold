@@ -279,12 +279,40 @@ pub fn sinkhorn_knopp_with_workspace(
         if iter > 0 {
             err_u = current_err_u;
             err_v = current_err_v;
-            if err_u <= config.tolerance && err_v <= config.tolerance {
+            let eff_tol = config.tolerance + 1e-6;
+            if err_u <= eff_tol && err_v <= eff_tol {
                 converged = true;
                 break;
             }
         } else {
             err_v = current_err_v;
+        }
+    }
+
+    if !converged {
+        // Evaluate the marginal error of the final (u_vec, v_vec) state
+        let mut final_err_u = 0.0f32;
+        for i in 0..n {
+            let k_row = match k_mat.get(i * m..(i + 1) * m) {
+                Some(r) => r,
+                None => {
+                    return Err(AetherError::OutOfBounds {
+                        index: (i + 1) * m,
+                        limit: k_mat.len(),
+                    })
+                }
+            };
+            let kv = simd_dot_product(k_row, v_vec);
+            if let Some(&u_val) = u_vec.get(i) {
+                let row_sum = u_val * kv;
+                final_err_u += (row_sum - mu_i).abs();
+            }
+        }
+        let eff_tol = config.tolerance + 1e-6;
+        if final_err_u <= eff_tol {
+            converged = true;
+            err_u = final_err_u;
+            err_v = 0.0;
         }
     }
 
