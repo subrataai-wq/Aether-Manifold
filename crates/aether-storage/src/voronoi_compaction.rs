@@ -104,13 +104,19 @@ pub fn execute_boundary_only_compaction<const D: usize>(
         };
         let d_knn = match knn_distances.get(i) {
             Some(&d) => d,
-            None => return Err(AetherError::OutOfBounds { index: i, limit: knn_distances.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: i,
+                    limit: knn_distances.len(),
+                })
+            }
         };
 
         let mut needs_relink = false;
         for cert in certs {
             if cert.modified {
-                let decision = evaluate_voronoi_boundary_certificate(config, u_coords, d_knn, cert)?;
+                let decision =
+                    evaluate_voronoi_boundary_certificate(config, u_coords, d_knn, cert)?;
                 if decision == CompactionDecision::BoundaryRelink {
                     needs_relink = true;
                     break;
@@ -128,4 +134,3 @@ pub fn execute_boundary_only_compaction<const D: usize>(
 
     Ok(stats)
 }
-

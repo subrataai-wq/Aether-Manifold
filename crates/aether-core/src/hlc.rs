@@ -4,10 +4,10 @@
 //! wall clock and a 16-bit logical counter with wait-free/lock-free CAS monotonic
 //! tick and receive-merge operations, per AGENTS.md and roadmap.md Section 3.4.
 
-#[cfg(loom)]
-use loom::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(loom))]
 use core::sync::atomic::{AtomicU64, Ordering};
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicU64, Ordering};
 
 use bytemuck::{Pod, Zeroable};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
@@ -236,4 +236,3 @@ impl HlcClock {
         HlcTimestamp(self.state.load(Ordering::Acquire))
     }
 }
-

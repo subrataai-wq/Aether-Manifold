@@ -15,17 +15,13 @@
     clippy::needless_range_loop
 )]
 
-use aether_core::alloc_guard::{
-    reset_hot_path_counters, HotPathAllocGuard, TrackingAllocator,
-};
+use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard, TrackingAllocator};
 use aether_core::page::TensorGraphPage;
 use aether_manifold::at_rq::{
     at_rq_build_query_lut, at_rq_pad_1024d_to_1032d, at_rq_score_page_neighbors,
     CompactNeighborCode,
 };
-use aether_manifold::hyperbolic::{
-    lorentz_compute_x0, lorentz_distance, lorentz_reproject,
-};
+use aether_manifold::hyperbolic::{lorentz_compute_x0, lorentz_distance, lorentz_reproject};
 use aether_manifold::simd::simd_dot_product;
 use aether_manifold::tangent::{lorentz_exp_map, lorentz_log_map, lorentz_project_tangent};
 use bytemuck::Zeroable;
@@ -86,7 +82,11 @@ fn gate_lorentz_horizon_zero_nans_boundary_sweep() {
                 (prng.rand_float() - 0.5) as f32,
             ];
             let norm_sq_x = dir_x[0] * dir_x[0] + dir_x[1] * dir_x[1] + dir_x[2] * dir_x[2];
-            let inv_norm = if norm_sq_x > 0.0 { 1.0 / norm_sq_x.sqrt() } else { 0.0 };
+            let inv_norm = if norm_sq_x > 0.0 {
+                1.0 / norm_sq_x.sqrt()
+            } else {
+                0.0
+            };
 
             let mut pt_x = [
                 0.0f32,
@@ -112,8 +112,16 @@ fn gate_lorentz_horizon_zero_nans_boundary_sweep() {
 
             // 4. Geodesic distance evaluation (must NEVER be NaN or negative)
             let dist = lorentz_distance(&pt_x, &pt_y, kappa).unwrap();
-            assert!(!dist.is_nan(), "lorentz_distance produced NaN at scale {}", scale);
-            assert!(dist >= 0.0, "lorentz_distance produced negative distance: {}", dist);
+            assert!(
+                !dist.is_nan(),
+                "lorentz_distance produced NaN at scale {}",
+                scale
+            );
+            assert!(
+                dist >= 0.0,
+                "lorentz_distance produced negative distance: {}",
+                dist
+            );
 
             // Distance to self must be 0
             let self_dist = lorentz_distance(&pt_x, &pt_x, kappa).unwrap();

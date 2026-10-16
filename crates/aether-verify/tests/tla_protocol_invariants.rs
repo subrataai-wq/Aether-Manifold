@@ -20,9 +20,9 @@
     clippy::needless_range_loop
 )]
 
+use aether_core::hlc::{HlcTimestamp, MAX_LOGICAL};
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::sync::atomic::AtomicU64;
-use aether_core::hlc::{HlcTimestamp, MAX_LOGICAL};
 
 // ============================================================================
 // PART 1: HLC Causal Consistency Model Checker (`HlcCausalConsistency.tla`)
@@ -129,7 +129,12 @@ fn test_tla_hlc_causal_consistency_invariants() {
 
             // Monotonicity check on step
             if prev.0 > 0 {
-                assert!(new_ts > prev, "LocalTick failed strict monotonicity: {:?} <= {:?}", new_ts, prev);
+                assert!(
+                    new_ts > prev,
+                    "LocalTick failed strict monotonicity: {:?} <= {:?}",
+                    new_ts,
+                    prev
+                );
             }
             next.last_hlc[n] = prev;
             next.hlc_nodes[n] = new_ts;
@@ -170,7 +175,8 @@ fn test_tla_hlc_causal_consistency_invariants() {
 
             let atomic_clock = AtomicU64::new(next.hlc_nodes[m].0);
             let prev = next.hlc_nodes[m];
-            let new_ts = HlcTimestamp::update_with_remote(&atomic_clock, msg.ts, next.phys_clocks[m]);
+            let new_ts =
+                HlcTimestamp::update_with_remote(&atomic_clock, msg.ts, next.phys_clocks[m]);
 
             // Invariant 2 assertion on merge:
             assert!(
@@ -195,7 +201,11 @@ fn test_tla_hlc_causal_consistency_invariants() {
         }
     }
 
-    assert!(states_explored >= 1_000, "Explored fewer than 1000 HLC states: {}", states_explored);
+    assert!(
+        states_explored >= 1_000,
+        "Explored fewer than 1000 HLC states: {}",
+        states_explored
+    );
 
     // --- Invariant 3: Inv_BoundedLogicalOverflow ---
     // Explicitly test boundary condition where logical counter reaches MAX_LOGICAL
@@ -207,16 +217,32 @@ fn test_tla_hlc_causal_consistency_invariants() {
 
         // Next tick under the SAME physical microsecond must advance physical by 1 and reset logical to 0
         let next_ts = HlcTimestamp::now_or_tick(&atomic_clock, 500);
-        assert!(next_ts > prev, "Overflow must strictly increase timestamp: {:?} <= {:?}", next_ts, prev);
-        assert_eq!(next_ts.physical(), 501, "Physical clock must safely increment upon logical exhaustion");
-        assert_eq!(next_ts.logical(), 0, "Logical counter must reset to 0 upon overflow");
+        assert!(
+            next_ts > prev,
+            "Overflow must strictly increase timestamp: {:?} <= {:?}",
+            next_ts,
+            prev
+        );
+        assert_eq!(
+            next_ts.physical(),
+            501,
+            "Physical clock must safely increment upon logical exhaustion"
+        );
+        assert_eq!(
+            next_ts.logical(),
+            0,
+            "Logical counter must reset to 0 upon overflow"
+        );
         total_overflows_verified += 1;
 
         // Test overflow during remote merge as well
         let remote_max = HlcTimestamp::pack(600, MAX_LOGICAL);
         let atomic_clock2 = AtomicU64::new(HlcTimestamp::pack(600, MAX_LOGICAL).0);
         let merged = HlcTimestamp::update_with_remote(&atomic_clock2, remote_max, 600);
-        assert!(merged > remote_max, "Overflow merge must strictly dominate remote");
+        assert!(
+            merged > remote_max,
+            "Overflow merge must strictly dominate remote"
+        );
         assert_eq!(merged.physical(), 601);
         assert_eq!(merged.logical(), 0);
         total_overflows_verified += 1;
@@ -271,8 +297,12 @@ impl KlsmSystemState {
         ];
 
         let mut committed = [
-            BTreeSet::new(), BTreeSet::new(), BTreeSet::new(),
-            BTreeSet::new(), BTreeSet::new(), BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeSet::new(),
         ];
         for set in committed.iter_mut() {
             set.insert(10);
@@ -280,17 +310,27 @@ impl KlsmSystemState {
 
         // Delaunay dual initial state within Voronoi cells
         let mut delaunay = [
-            BTreeSet::new(), BTreeSet::new(), BTreeSet::new(),
-            BTreeSet::new(), BTreeSet::new(), BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeSet::new(),
+            BTreeSet::new(),
         ];
         // Cell 0 clique
-        delaunay[0].insert(1); delaunay[0].insert(2);
-        delaunay[1].insert(0); delaunay[1].insert(2);
-        delaunay[2].insert(0); delaunay[2].insert(1);
+        delaunay[0].insert(1);
+        delaunay[0].insert(2);
+        delaunay[1].insert(0);
+        delaunay[1].insert(2);
+        delaunay[2].insert(0);
+        delaunay[2].insert(1);
         // Cell 1 clique
-        delaunay[3].insert(4); delaunay[3].insert(5);
-        delaunay[4].insert(3); delaunay[4].insert(5);
-        delaunay[5].insert(3); delaunay[5].insert(4);
+        delaunay[3].insert(4);
+        delaunay[3].insert(5);
+        delaunay[4].insert(3);
+        delaunay[4].insert(5);
+        delaunay[5].insert(3);
+        delaunay[5].insert(4);
 
         Self {
             vertex_cells,
@@ -381,7 +421,12 @@ fn test_tla_klsm_boundary_compaction_invariants() {
                 .copied()
                 .filter(|&ts| ts <= q_ts)
                 .collect();
-            assert!(!visible_versions.is_empty(), "Reader {} must see valid version for vertex {}", reader_id, v);
+            assert!(
+                !visible_versions.is_empty(),
+                "Reader {} must see valid version for vertex {}",
+                reader_id,
+                v
+            );
         }
     }
 
@@ -390,7 +435,7 @@ fn test_tla_klsm_boundary_compaction_invariants() {
 
     // Step 5: Safe Epoch Reclamation
     state.compaction_phase = 5; // Reclaimed
-    // Only post-compaction readers remain
+                                // Only post-compaction readers remain
     for &(_, _, run_view) in &state.readers {
         assert_eq!(run_view, RunDirectoryState::PostCompaction);
     }

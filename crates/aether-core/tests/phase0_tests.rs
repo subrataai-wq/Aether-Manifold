@@ -14,9 +14,7 @@
     clippy::indexing_slicing
 )]
 
-use aether_core::alloc_guard::{
-    reset_hot_path_counters, HotPathAllocGuard, TrackingAllocator,
-};
+use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard, TrackingAllocator};
 use aether_core::error::AetherError;
 use aether_core::hlc::HlcTimestamp;
 use aether_core::page::{PageHeader, TensorGraphPage};
@@ -46,15 +44,24 @@ fn proof_tensor_page_layout_invariants() {
     assert_eq!(core::mem::offset_of!(PageHeader, active_vertex_count), 4);
     assert_eq!(core::mem::offset_of!(PageHeader, lsn), 8);
     assert_eq!(core::mem::offset_of!(PageHeader, page_id), 16);
-    assert_eq!(core::mem::offset_of!(PageHeader, manifold_curvature_bits), 24);
+    assert_eq!(
+        core::mem::offset_of!(PageHeader, manifold_curvature_bits),
+        24
+    );
     assert_eq!(core::mem::offset_of!(PageHeader, csr_offset_table), 32);
 
     // TensorGraphPage field offsets per roadmap.md Section 3.2
     assert_eq!(core::mem::offset_of!(TensorGraphPage, header), 0);
     assert_eq!(core::mem::offset_of!(TensorGraphPage, at_rq_codebooks), 64);
     assert_eq!(core::mem::offset_of!(TensorGraphPage, neighbor_ids), 320);
-    assert_eq!(core::mem::offset_of!(TensorGraphPage, quantized_neighbors), 832);
-    assert_eq!(core::mem::offset_of!(TensorGraphPage, sheaf_edge_weights), 2880);
+    assert_eq!(
+        core::mem::offset_of!(TensorGraphPage, quantized_neighbors),
+        832
+    );
+    assert_eq!(
+        core::mem::offset_of!(TensorGraphPage, sheaf_edge_weights),
+        2880
+    );
 }
 
 /// TEST-MEM-02: Zero-copy cast soundness, alignment enforcement, and 0-allocation casting.
@@ -81,7 +88,10 @@ fn proof_zero_copy_cast_soundness() {
     let unaligned_slice = &unaligned_raw[offset..offset + 4096];
     let unaligned_res = TensorGraphPage::from_aligned_bytes(unaligned_slice);
     match unaligned_res {
-        Err(AetherError::InvalidAlignment { ptr, required_align }) => {
+        Err(AetherError::InvalidAlignment {
+            ptr,
+            required_align,
+        }) => {
             assert_eq!(required_align, 4096);
             assert_eq!(ptr, unaligned_slice.as_ptr() as usize);
         }
@@ -147,7 +157,10 @@ fn proof_pod_stack_scratchpad_bounds() {
     let overflow_res = scratchpad.try_alloc_slice::<f32>(200);
     assert!(overflow_res.is_err());
     match overflow_res {
-        Err(AetherError::ScratchpadExhausted { requested, available }) => {
+        Err(AetherError::ScratchpadExhausted {
+            requested,
+            available,
+        }) => {
             assert_eq!(requested, 200 * core::mem::size_of::<f32>());
             assert!(available < requested);
         }
@@ -178,20 +191,13 @@ fn loom_hlc_timestamp_monotonicity() {
                 for i in 0..iters {
                     let ts = match tid {
                         0 => HlcTimestamp::now_or_tick(&clock_clone, 10_000 + i as u64 * 10),
-                        1 => HlcTimestamp::now_or_tick(
-                            &clock_clone,
-                            20_000 - (i as u64 % 50) * 10,
-                        ), // backward jumps
+                        1 => HlcTimestamp::now_or_tick(&clock_clone, 20_000 - (i as u64 % 50) * 10), // backward jumps
                         2 => HlcTimestamp::now_or_tick(&clock_clone, 15_000), // stalled clock
                         _ => {
                             if i % 2 == 0 {
-                                let remote =
-                                    HlcTimestamp::pack(12_000 + i as u64, (i % 20) as u16);
-                                let merged = HlcTimestamp::update_with_remote(
-                                    &clock_clone,
-                                    remote,
-                                    11_000,
-                                );
+                                let remote = HlcTimestamp::pack(12_000 + i as u64, (i % 20) as u16);
+                                let merged =
+                                    HlcTimestamp::update_with_remote(&clock_clone, remote, 11_000);
                                 assert!(merged > remote);
                                 merged
                             } else {

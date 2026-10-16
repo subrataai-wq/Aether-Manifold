@@ -18,8 +18,8 @@
 use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard, TrackingAllocator};
 use aether_core::page::TensorGraphPage;
 use aether_manifold::at_rq::{
-    anisotropic_residual_loss, at_rq_build_query_lut, at_rq_decode_neighbor,
-    at_rq_encode_neighbor, at_rq_score_page_neighbors, CompactNeighborCode,
+    anisotropic_residual_loss, at_rq_build_query_lut, at_rq_decode_neighbor, at_rq_encode_neighbor,
+    at_rq_score_page_neighbors, CompactNeighborCode,
 };
 use aether_manifold::hyperbolic::{lorentz_compute_x0, lorentz_inner_product};
 use aether_manifold::product::{
@@ -53,14 +53,21 @@ fn test_lorentz_exp_log_bijection() {
     lorentz_project_tangent(&x, &raw_w, kappa, &mut v).unwrap();
 
     let inner_xv = lorentz_inner_product(&x, &v).unwrap();
-    assert!(inner_xv.abs() < 1e-6, "v must be strictly tangent: {}", inner_xv);
+    assert!(
+        inner_xv.abs() < 1e-6,
+        "v must be strictly tangent: {}",
+        inner_xv
+    );
 
     // 1. Standard distance bijection
     let mut y = [0.0f32; 4];
     lorentz_exp_map(&x, &v, kappa, &mut y).unwrap();
 
     let inner_yy = lorentz_inner_product(&y, &y).unwrap();
-    assert!((inner_yy - (-1.0)).abs() < 1e-5, "y must satisfy surface invariant");
+    assert!(
+        (inner_yy - (-1.0)).abs() < 1e-5,
+        "y must satisfy surface invariant"
+    );
 
     let mut v_rec = [0.0f32; 4];
     lorentz_log_map(&x, &y, kappa, &mut v_rec).unwrap();
@@ -122,7 +129,11 @@ fn test_spherical_exp_log_bijection() {
     spherical_project_tangent(&x, &raw_w, &mut v).unwrap();
 
     let dot_xv = simd_dot_product(&x, &v);
-    assert!(dot_xv.abs() < 1e-6, "v must be tangent to sphere: {}", dot_xv);
+    assert!(
+        dot_xv.abs() < 1e-6,
+        "v must be tangent to sphere: {}",
+        dot_xv
+    );
 
     // 1. Standard distance bijection
     let mut y = [0.0f32; 3];
@@ -195,8 +206,16 @@ fn test_lorentz_parallel_transport_isometry() {
     // Verify transported vectors are tangent at y: <y, u_trans> = 0
     let inner_yu = lorentz_inner_product(&y, &u_trans).unwrap();
     let inner_yv = lorentz_inner_product(&y, &v_trans).unwrap();
-    assert!(inner_yu.abs() < 1e-5, "u_trans must be in T_y H^3: {}", inner_yu);
-    assert!(inner_yv.abs() < 1e-5, "v_trans must be in T_y H^3: {}", inner_yv);
+    assert!(
+        inner_yu.abs() < 1e-5,
+        "u_trans must be in T_y H^3: {}",
+        inner_yu
+    );
+    assert!(
+        inner_yv.abs() < 1e-5,
+        "v_trans must be in T_y H^3: {}",
+        inner_yv
+    );
 
     // Verify Riemannian isometry: <u_trans, v_trans>_L == <u, v>_L
     let inner_trans_uv = lorentz_inner_product(&u_trans, &v_trans).unwrap();
@@ -234,8 +253,8 @@ fn test_product_manifold_mvcc_time_travel() {
     let x0 = lorentz_compute_x0(&x_sp, -1.0).unwrap();
     let x_tau1 = [
         x0, x_sp[0], x_sp[1], x_sp[2], // Hyperbolic (dim 4)
-        1.0, 0.0, 0.0,                 // Spherical (dim 3)
-        2.0, -1.0,                     // Euclidean (dim 2)
+        1.0, 0.0, 0.0, // Spherical (dim 3)
+        2.0, -1.0, // Euclidean (dim 2)
     ];
 
     // Velocity vector Delta v in T_{x(tau_1)} M
@@ -302,8 +321,7 @@ fn test_anisotropic_parallel_penalty_dominance() {
 
     let loss_parallel =
         anisotropic_residual_loss(&v, &v_hat_parallel, eta_parallel, eta_ortho).unwrap();
-    let loss_ortho =
-        anisotropic_residual_loss(&v, &v_hat_ortho, eta_parallel, eta_ortho).unwrap();
+    let loss_ortho = anisotropic_residual_loss(&v, &v_hat_ortho, eta_parallel, eta_ortho).unwrap();
 
     assert!(
         loss_parallel > 50.0 * loss_ortho,
@@ -332,16 +350,8 @@ fn gate_zero_hot_path_allocations_tangent_and_page_adc() {
         }),
     };
 
-    let base = [
-        1.2247449f32, 0.3, -0.4, 0.5,
-        1.0, 0.0, 0.0,
-        2.0, -1.0,
-    ];
-    let tangent = [
-        0.0f32, 0.1, -0.1, 0.2,
-        0.0, 0.1, 0.1,
-        0.2, 0.3,
-    ];
+    let base = [1.2247449f32, 0.3, -0.4, 0.5, 1.0, 0.0, 0.0, 2.0, -1.0];
+    let tangent = [0.0f32, 0.1, -0.1, 0.2, 0.0, 0.1, 0.1, 0.2, 0.3];
     let mut out_point = [0.0f32; 9];
     let mut out_tangent = [0.0f32; 9];
 
@@ -454,14 +464,26 @@ fn test_at_rq_encode_decode_roundtrip() {
     assert!(code.radial_norm_sq > 0.0);
 
     let mut reconstructed = vec![0.0f32; dim];
-    at_rq_decode_neighbor(&code, &codebooks, centroids_per_subspace, &mut reconstructed).unwrap();
+    at_rq_decode_neighbor(
+        &code,
+        &codebooks,
+        centroids_per_subspace,
+        &mut reconstructed,
+    )
+    .unwrap();
 
     let diff_sq = simd_euclidean_distance_squared(&v_tangent, &reconstructed);
     assert!(diff_sq.is_finite());
 
     // Build query LUT and verify dimensions and finite values
     let mut query_lut = vec![0.0f32; 24 * centroids_per_subspace];
-    at_rq_build_query_lut(&v_tangent, &codebooks, centroids_per_subspace, &mut query_lut).unwrap();
+    at_rq_build_query_lut(
+        &v_tangent,
+        &codebooks,
+        centroids_per_subspace,
+        &mut query_lut,
+    )
+    .unwrap();
     assert!(query_lut.iter().all(|x| x.is_finite()));
 }
 
@@ -494,16 +516,8 @@ fn test_spherical_and_product_parallel_transport() {
         }),
     };
 
-    let p1 = [
-        1.2247449f32, 0.3, -0.4, 0.5,
-        1.0, 0.0, 0.0,
-        2.0, -1.0,
-    ];
-    let p2 = [
-        1.2247449f32, -0.3, 0.4, 0.5,
-        0.0, 1.0, 0.0,
-        0.0, 1.0,
-    ];
+    let p1 = [1.2247449f32, 0.3, -0.4, 0.5, 1.0, 0.0, 0.0, 2.0, -1.0];
+    let p2 = [1.2247449f32, -0.3, 0.4, 0.5, 0.0, 1.0, 0.0, 0.0, 1.0];
     let mut v = [0.0f32; 9];
     let raw_vh = [0.0f32, 1.0, 0.0, 0.0];
     lorentz_project_tangent(&p1[..4], &raw_vh, -1.0, &mut v[..4]).unwrap();

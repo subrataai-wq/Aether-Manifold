@@ -21,10 +21,10 @@
 )]
 
 use aether_manifold::{
-    lorentz_compute_x0, lorentz_inner_product, lorentz_reproject,
-    product_manifold_distance, product_manifold_distance_squared,
-    scalar_product_manifold_distance_squared, spherical_distance, spherical_normalize,
-    EuclideanSpec, HyperbolicSpec, ProductManifoldConfig, SphericalSpec,
+    lorentz_compute_x0, lorentz_inner_product, lorentz_reproject, product_manifold_distance,
+    product_manifold_distance_squared, scalar_product_manifold_distance_squared,
+    spherical_distance, spherical_normalize, EuclideanSpec, HyperbolicSpec, ProductManifoldConfig,
+    SphericalSpec,
 };
 use proptest::prelude::*;
 

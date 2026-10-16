@@ -5,16 +5,16 @@
 //! and the lock-free Boundary-Only Voronoi Delaunay compaction protocol per roadmap.md Section 3.
 #![forbid(unsafe_op_in_unsafe_fn)]
 
-pub mod spsc;
-pub mod page_arena;
 pub mod l0_mvcc;
+pub mod page_arena;
 pub mod shard_runtime;
+pub mod spsc;
 pub mod voronoi_compaction;
 
-pub use spsc::{CachePaddedAtomicUsize, SpscRingBuffer};
-pub use page_arena::AlignedPageArena;
 pub use l0_mvcc::{L0MorphismLog, TangentDeltaEntry};
+pub use page_arena::AlignedPageArena;
 pub use shard_runtime::{CoreShardRuntime, IoCompletionCqe, IoOpcode, IoSubmissionSqe};
+pub use spsc::{CachePaddedAtomicUsize, SpscRingBuffer};
 pub use voronoi_compaction::{
     evaluate_voronoi_boundary_certificate, execute_boundary_only_compaction, CompactionDecision,
     CompactionStats, VoronoiCellCertificate,

@@ -6,10 +6,10 @@
 
 use aether_core::error::AetherError;
 
-#[cfg(loom)]
-use loom::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(not(loom))]
 use core::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicUsize, Ordering};
 
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
@@ -189,4 +189,3 @@ impl<T: Copy, const N: usize> Default for SpscRingBuffer<T, N> {
         Self::new()
     }
 }
-

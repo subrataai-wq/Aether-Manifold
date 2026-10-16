@@ -24,9 +24,9 @@ pub mod spherical;
 pub mod tangent;
 
 pub use at_rq::{
-    anisotropic_residual_loss, at_rq_build_query_lut, at_rq_decode_neighbor,
-    at_rq_encode_neighbor, at_rq_pad_1024d_to_1032d, at_rq_score_page_neighbors,
-    CompactNeighborCode, curvature_corrected_tangent_distance_squared,
+    anisotropic_residual_loss, at_rq_build_query_lut, at_rq_decode_neighbor, at_rq_encode_neighbor,
+    at_rq_pad_1024d_to_1032d, at_rq_score_page_neighbors,
+    curvature_corrected_tangent_distance_squared, CompactNeighborCode,
 };
 
 pub use tangent::{
@@ -53,13 +53,13 @@ pub use hyperbolic::{
     scalar_lorentz_inner_product, HORIZON_EPSILON,
 };
 pub use product::{
-    product_manifold_distance, product_manifold_distance_squared,
-    scalar_product_manifold_distance, scalar_product_manifold_distance_squared, EuclideanSpec,
-    HyperbolicSpec, ProductManifoldConfig, SphericalSpec,
+    product_manifold_distance, product_manifold_distance_squared, scalar_product_manifold_distance,
+    scalar_product_manifold_distance_squared, EuclideanSpec, HyperbolicSpec, ProductManifoldConfig,
+    SphericalSpec,
 };
 pub use simd::{
-    scalar_dot_product, scalar_euclidean_distance_squared, scalar_sum_of_squares,
-    simd_axpy, simd_dot_product, simd_euclidean_distance_squared, simd_sum_of_squares,
+    scalar_dot_product, scalar_euclidean_distance_squared, scalar_sum_of_squares, simd_axpy,
+    simd_dot_product, simd_euclidean_distance_squared, simd_sum_of_squares,
 };
 pub use spherical::{
     scalar_spherical_distance, scalar_spherical_normalize, spherical_distance,

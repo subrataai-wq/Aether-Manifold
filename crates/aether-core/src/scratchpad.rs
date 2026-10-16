@@ -56,4 +56,3 @@ impl<'a> Scratchpad<'a> {
         Ok(slice)
     }
 }
-

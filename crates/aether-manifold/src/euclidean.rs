@@ -8,11 +8,11 @@
 //! $$d_{\mathbb{R}}^2(u, v) = \|u - v\|_2^2 = \sum_{l=0}^{d_E-1} (u_l - v_l)^2$$
 //! $$d_{\mathbb{R}}(u, v) = \sqrt{d_{\mathbb{R}}^2(u, v)}$$
 
-use aether_core::error::AetherError;
 use crate::simd::{
     scalar_dot_product, scalar_euclidean_distance_squared, simd_dot_product,
     simd_euclidean_distance_squared,
 };
+use aether_core::error::AetherError;
 
 /// Compute the squared Euclidean distance $d_{\mathbb{R}}^2(u, v) = \|u - v\|_2^2$
 /// using runtime-dispatched SIMD with 4x unrolled accumulators.
@@ -84,4 +84,3 @@ pub fn scalar_euclidean_dot_product_checked(u: &[f32], v: &[f32]) -> Result<f32,
     }
     Ok(scalar_dot_product(u, v))
 }
-

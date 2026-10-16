@@ -10,11 +10,11 @@
 //! In strict compliance with roadmap.md Sections 2.1, 2.4, 3.2, AGENTS.md Rule 3.1
 //! (zero heap allocations), and AGENTS.md Rule 4.1 (numerical horizon stabilization).
 
-use aether_core::error::AetherError;
 use crate::hyperbolic::{lorentz_inner_product, lorentz_reproject};
 use crate::product::ProductManifoldConfig;
 use crate::simd::simd_dot_product;
 use crate::spherical::spherical_normalize;
+use aether_core::error::AetherError;
 
 // ============================================================================
 // 1. Lorentz Hyperbolic Space (\mathbb{H}_{\kappa}^{d_H}, \kappa < 0)
@@ -56,11 +56,9 @@ pub fn lorentz_project_tangent(
     let factor = kappa * inner;
 
     for i in 0..base.len() {
-        if let (Some(out_ref), Some(&v_val), Some(&b_val)) = (
-            out.get_mut(i),
-            vec.get(i),
-            base.get(i),
-        ) {
+        if let (Some(out_ref), Some(&v_val), Some(&b_val)) =
+            (out.get_mut(i), vec.get(i), base.get(i))
+        {
             *out_ref = v_val - factor * b_val;
         }
     }
@@ -126,11 +124,9 @@ pub fn lorentz_exp_map(
     };
 
     for i in 0..base.len() {
-        if let (Some(out_ref), Some(&b_val), Some(&t_val)) = (
-            out.get_mut(i),
-            base.get(i),
-            tangent.get(i),
-        ) {
+        if let (Some(out_ref), Some(&b_val), Some(&t_val)) =
+            (out.get_mut(i), base.get(i), tangent.get(i))
+        {
             let val = coef_x * b_val + coef_v * (t_val * scale_factor);
             *out_ref = if val.is_nan() {
                 0.0
@@ -205,11 +201,9 @@ pub fn lorentz_log_map(
     };
 
     for i in 0..base.len() {
-        if let (Some(out_ref), Some(&t_val), Some(&b_val)) = (
-            out.get_mut(i),
-            target.get(i),
-            base.get(i),
-        ) {
+        if let (Some(out_ref), Some(&t_val), Some(&b_val)) =
+            (out.get_mut(i), target.get(i), base.get(i))
+        {
             let val = coef * (t_val - z * b_val);
             *out_ref = if val.is_nan() { 0.0 } else { val };
         }
@@ -264,12 +258,9 @@ pub fn lorentz_parallel_transport(
     let factor = (kappa * inner_yv) / denom;
 
     for i in 0..base.len() {
-        if let (Some(out_ref), Some(&v_val), Some(&x_val), Some(&y_val)) = (
-            out.get_mut(i),
-            tangent.get(i),
-            base.get(i),
-            target.get(i),
-        ) {
+        if let (Some(out_ref), Some(&v_val), Some(&x_val), Some(&y_val)) =
+            (out.get_mut(i), tangent.get(i), base.get(i), target.get(i))
+        {
             *out_ref = v_val - factor * (x_val + y_val);
         }
     }
@@ -306,11 +297,9 @@ pub fn spherical_project_tangent(
 
     let dot = simd_dot_product(base, vec);
     for i in 0..base.len() {
-        if let (Some(out_ref), Some(&v_val), Some(&b_val)) = (
-            out.get_mut(i),
-            vec.get(i),
-            base.get(i),
-        ) {
+        if let (Some(out_ref), Some(&v_val), Some(&b_val)) =
+            (out.get_mut(i), vec.get(i), base.get(i))
+        {
             *out_ref = v_val - dot * b_val;
         }
     }
@@ -368,11 +357,9 @@ pub fn spherical_exp_map(
     };
 
     for i in 0..base.len() {
-        if let (Some(out_ref), Some(&b_val), Some(&t_val)) = (
-            out.get_mut(i),
-            base.get(i),
-            tangent.get(i),
-        ) {
+        if let (Some(out_ref), Some(&b_val), Some(&t_val)) =
+            (out.get_mut(i), base.get(i), tangent.get(i))
+        {
             *out_ref = coef_x * b_val + coef_v * t_val;
         }
     }
@@ -441,11 +428,9 @@ pub fn spherical_log_map(
     };
 
     for i in 0..base.len() {
-        if let (Some(out_ref), Some(&t_val), Some(&b_val)) = (
-            out.get_mut(i),
-            target.get(i),
-            base.get(i),
-        ) {
+        if let (Some(out_ref), Some(&t_val), Some(&b_val)) =
+            (out.get_mut(i), target.get(i), base.get(i))
+        {
             *out_ref = factor * (t_val - z * b_val);
         }
     }
@@ -495,12 +480,9 @@ pub fn spherical_parallel_transport(
     let factor = inner_yv / denom;
 
     for i in 0..base.len() {
-        if let (Some(out_ref), Some(&v_val), Some(&x_val), Some(&y_val)) = (
-            out.get_mut(i),
-            tangent.get(i),
-            base.get(i),
-            target.get(i),
-        ) {
+        if let (Some(out_ref), Some(&v_val), Some(&x_val), Some(&y_val)) =
+            (out.get_mut(i), tangent.get(i), base.get(i), target.get(i))
+        {
             *out_ref = v_val - factor * (x_val + y_val);
         }
     }
@@ -526,7 +508,11 @@ pub fn euclidean_project_tangent(vec: &[f32], out: &mut [f32]) -> Result<(), Aet
 
 /// Compute the Euclidean Exponential Map $\exp_x(v) = x + v$.
 #[inline]
-pub fn euclidean_exp_map(base: &[f32], tangent: &[f32], out: &mut [f32]) -> Result<(), AetherError> {
+pub fn euclidean_exp_map(
+    base: &[f32],
+    tangent: &[f32],
+    out: &mut [f32],
+) -> Result<(), AetherError> {
     if base.len() != tangent.len() || base.len() != out.len() {
         return Err(AetherError::InvalidBufferSize {
             actual: tangent.len(),
@@ -534,11 +520,9 @@ pub fn euclidean_exp_map(base: &[f32], tangent: &[f32], out: &mut [f32]) -> Resu
         });
     }
     for i in 0..base.len() {
-        if let (Some(out_ref), Some(&b_val), Some(&t_val)) = (
-            out.get_mut(i),
-            base.get(i),
-            tangent.get(i),
-        ) {
+        if let (Some(out_ref), Some(&b_val), Some(&t_val)) =
+            (out.get_mut(i), base.get(i), tangent.get(i))
+        {
             *out_ref = b_val + t_val;
         }
     }
@@ -555,11 +539,9 @@ pub fn euclidean_log_map(base: &[f32], target: &[f32], out: &mut [f32]) -> Resul
         });
     }
     for i in 0..base.len() {
-        if let (Some(out_ref), Some(&t_val), Some(&b_val)) = (
-            out.get_mut(i),
-            target.get(i),
-            base.get(i),
-        ) {
+        if let (Some(out_ref), Some(&t_val), Some(&b_val)) =
+            (out.get_mut(i), target.get(i), base.get(i))
+        {
             *out_ref = t_val - b_val;
         }
     }
@@ -609,15 +591,30 @@ pub fn product_exp_map(
         let next_offset = offset + h.dim;
         let sub_base = match base.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: base.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: base.len(),
+                })
+            }
         };
         let sub_tangent = match tangent.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: tangent.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: tangent.len(),
+                })
+            }
         };
         let sub_out = match out.get_mut(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: out.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: out.len(),
+                })
+            }
         };
 
         lorentz_exp_map(sub_base, sub_tangent, h.kappa, sub_out)?;
@@ -628,15 +625,30 @@ pub fn product_exp_map(
         let next_offset = offset + s.dim;
         let sub_base = match base.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: base.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: base.len(),
+                })
+            }
         };
         let sub_tangent = match tangent.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: tangent.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: tangent.len(),
+                })
+            }
         };
         let sub_out = match out.get_mut(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: out.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: out.len(),
+                })
+            }
         };
 
         spherical_exp_map(sub_base, sub_tangent, s.tau, sub_out)?;
@@ -647,15 +659,30 @@ pub fn product_exp_map(
         let next_offset = offset + e.dim;
         let sub_base = match base.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: base.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: base.len(),
+                })
+            }
         };
         let sub_tangent = match tangent.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: tangent.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: tangent.len(),
+                })
+            }
         };
         let sub_out = match out.get_mut(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: out.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: out.len(),
+                })
+            }
         };
 
         euclidean_exp_map(sub_base, sub_tangent, sub_out)?;
@@ -690,15 +717,30 @@ pub fn product_log_map(
         let next_offset = offset + h.dim;
         let sub_base = match base.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: base.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: base.len(),
+                })
+            }
         };
         let sub_target = match target.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: target.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: target.len(),
+                })
+            }
         };
         let sub_out = match out.get_mut(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: out.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: out.len(),
+                })
+            }
         };
 
         lorentz_log_map(sub_base, sub_target, h.kappa, sub_out)?;
@@ -709,15 +751,30 @@ pub fn product_log_map(
         let next_offset = offset + s.dim;
         let sub_base = match base.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: base.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: base.len(),
+                })
+            }
         };
         let sub_target = match target.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: target.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: target.len(),
+                })
+            }
         };
         let sub_out = match out.get_mut(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: out.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: out.len(),
+                })
+            }
         };
 
         spherical_log_map(sub_base, sub_target, s.tau, sub_out)?;
@@ -728,15 +785,30 @@ pub fn product_log_map(
         let next_offset = offset + e.dim;
         let sub_base = match base.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: base.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: base.len(),
+                })
+            }
         };
         let sub_target = match target.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: target.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: target.len(),
+                })
+            }
         };
         let sub_out = match out.get_mut(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: out.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: out.len(),
+                })
+            }
         };
 
         euclidean_log_map(sub_base, sub_target, sub_out)?;
@@ -760,7 +832,11 @@ pub fn product_parallel_transport(
     out: &mut [f32],
 ) -> Result<(), AetherError> {
     let total_dim = config.total_dim();
-    if base.len() != total_dim || target.len() != total_dim || tangent.len() != total_dim || out.len() != total_dim {
+    if base.len() != total_dim
+        || target.len() != total_dim
+        || tangent.len() != total_dim
+        || out.len() != total_dim
+    {
         return Err(AetherError::InvalidBufferSize {
             actual: base.len(),
             expected: total_dim,
@@ -773,19 +849,39 @@ pub fn product_parallel_transport(
         let next_offset = offset + h.dim;
         let sub_base = match base.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: base.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: base.len(),
+                })
+            }
         };
         let sub_target = match target.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: target.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: target.len(),
+                })
+            }
         };
         let sub_tangent = match tangent.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: tangent.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: tangent.len(),
+                })
+            }
         };
         let sub_out = match out.get_mut(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: out.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: out.len(),
+                })
+            }
         };
 
         lorentz_parallel_transport(sub_base, sub_target, sub_tangent, h.kappa, sub_out)?;
@@ -796,19 +892,39 @@ pub fn product_parallel_transport(
         let next_offset = offset + s.dim;
         let sub_base = match base.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: base.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: base.len(),
+                })
+            }
         };
         let sub_target = match target.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: target.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: target.len(),
+                })
+            }
         };
         let sub_tangent = match tangent.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: tangent.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: tangent.len(),
+                })
+            }
         };
         let sub_out = match out.get_mut(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: out.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: out.len(),
+                })
+            }
         };
 
         spherical_parallel_transport(sub_base, sub_target, sub_tangent, sub_out)?;
@@ -819,11 +935,21 @@ pub fn product_parallel_transport(
         let next_offset = offset + e.dim;
         let sub_tangent = match tangent.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: tangent.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: tangent.len(),
+                })
+            }
         };
         let sub_out = match out.get_mut(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: out.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: out.len(),
+                })
+            }
         };
 
         euclidean_parallel_transport(sub_tangent, sub_out)?;

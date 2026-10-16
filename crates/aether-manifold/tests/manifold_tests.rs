@@ -15,10 +15,10 @@ use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard, Track
 use aether_core::error::AetherError;
 use aether_manifold::{
     euclidean_distance, euclidean_distance_squared, lorentz_compute_x0, lorentz_distance,
-    lorentz_distance_squared, lorentz_inner_product, lorentz_reproject,
-    product_manifold_distance, product_manifold_distance_squared, scalar_lorentz_distance,
-    scalar_spherical_distance, spherical_distance, spherical_distance_squared,
-    spherical_normalize, EuclideanSpec, HyperbolicSpec, ProductManifoldConfig, SphericalSpec,
+    lorentz_distance_squared, lorentz_inner_product, lorentz_reproject, product_manifold_distance,
+    product_manifold_distance_squared, scalar_lorentz_distance, scalar_spherical_distance,
+    spherical_distance, spherical_distance_squared, spherical_normalize, EuclideanSpec,
+    HyperbolicSpec, ProductManifoldConfig, SphericalSpec,
 };
 
 #[global_allocator]
@@ -181,7 +181,11 @@ fn gate_zero_hot_path_allocations_on_distances() {
         let _ = euclidean_distance_squared(&u, &v).unwrap();
         let _ = euclidean_distance(&u, &v).unwrap();
 
-        assert_eq!(guard.alloc_count(), 0, "Euclidean distance allocated heap memory");
+        assert_eq!(
+            guard.alloc_count(),
+            0,
+            "Euclidean distance allocated heap memory"
+        );
         assert!(guard.assert_zero_allocations().is_ok());
     }
 
@@ -198,7 +202,11 @@ fn gate_zero_hot_path_allocations_on_distances() {
         let _ = lorentz_distance(&h_u, &h_v, -1.0).unwrap();
         let _ = lorentz_distance_squared(&h_u, &h_v, -1.0).unwrap();
 
-        assert_eq!(guard.alloc_count(), 0, "Lorentz distance allocated heap memory");
+        assert_eq!(
+            guard.alloc_count(),
+            0,
+            "Lorentz distance allocated heap memory"
+        );
         assert!(guard.assert_zero_allocations().is_ok());
     }
 
@@ -212,8 +220,11 @@ fn gate_zero_hot_path_allocations_on_distances() {
         let _ = spherical_distance(&s_u, &s_v, 2.0).unwrap();
         let _ = spherical_distance_squared(&s_u, &s_v, 2.0).unwrap();
 
-        assert_eq!(guard.alloc_count(), 0, "Spherical distance allocated heap memory");
+        assert_eq!(
+            guard.alloc_count(),
+            0,
+            "Spherical distance allocated heap memory"
+        );
         assert!(guard.assert_zero_allocations().is_ok());
     }
 }
-

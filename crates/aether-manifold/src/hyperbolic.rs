@@ -12,8 +12,10 @@
 //! - Boundary-stabilized geodesic distance with horizon clamping:
 //!   $$d_{\mathbb{H}_{\kappa}}(x, y) = \frac{1}{\sqrt{-\kappa}} \operatorname{arcosh}\left( \max\left(1 + \epsilon_{\text{mach}}, \, \kappa \langle x, y \rangle_{\mathcal{L}}\right) \right)$$
 
+use crate::simd::{
+    scalar_dot_product, scalar_sum_of_squares, simd_dot_product, simd_sum_of_squares,
+};
 use aether_core::error::AetherError;
-use crate::simd::{scalar_dot_product, scalar_sum_of_squares, simd_dot_product, simd_sum_of_squares};
 
 /// Machine epsilon horizon stabilization threshold per AGENTS.md Rule 4.1.
 pub const HORIZON_EPSILON: f32 = 1e-7;
@@ -39,11 +41,21 @@ pub fn lorentz_inner_product(x: &[f32], y: &[f32]) -> Result<f32, AetherError> {
 
     let x0 = match x.first() {
         Some(&val) => val,
-        None => return Err(AetherError::OutOfBounds { index: 0, limit: x.len() }),
+        None => {
+            return Err(AetherError::OutOfBounds {
+                index: 0,
+                limit: x.len(),
+            })
+        }
     };
     let y0 = match y.first() {
         Some(&val) => val,
-        None => return Err(AetherError::OutOfBounds { index: 0, limit: y.len() }),
+        None => {
+            return Err(AetherError::OutOfBounds {
+                index: 0,
+                limit: y.len(),
+            })
+        }
     };
 
     let spatial_x = match x.get(1..) {
@@ -163,11 +175,21 @@ pub fn scalar_lorentz_inner_product(x: &[f32], y: &[f32]) -> Result<f32, AetherE
     }
     let x0 = match x.first() {
         Some(&v) => v,
-        None => return Err(AetherError::OutOfBounds { index: 0, limit: x.len() }),
+        None => {
+            return Err(AetherError::OutOfBounds {
+                index: 0,
+                limit: x.len(),
+            })
+        }
     };
     let y0 = match y.first() {
         Some(&v) => v,
-        None => return Err(AetherError::OutOfBounds { index: 0, limit: y.len() }),
+        None => {
+            return Err(AetherError::OutOfBounds {
+                index: 0,
+                limit: y.len(),
+            })
+        }
     };
     let spatial_x = match x.get(1..) {
         Some(s) => s,

@@ -22,8 +22,8 @@
 extern crate alloc;
 use alloc::vec;
 
-use aether_core::error::AetherError;
 use crate::simd::{simd_axpy, simd_dot_product, simd_euclidean_distance_squared};
+use aether_core::error::AetherError;
 
 /// Threshold below which log-domain stabilization is automatically engaged
 /// to eliminate floating-point underflow or overflow.
@@ -147,12 +147,22 @@ pub fn sinkhorn_knopp_with_workspace(
     for i in 0..n {
         let a_vec = match a_bag.get(i * dim..(i + 1) * dim) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: (i + 1) * dim, limit: a_bag.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: (i + 1) * dim,
+                    limit: a_bag.len(),
+                })
+            }
         };
         for j in 0..m {
             let b_vec = match b_bag.get(j * dim..(j + 1) * dim) {
                 Some(s) => s,
-                None => return Err(AetherError::OutOfBounds { index: (j + 1) * dim, limit: b_bag.len() }),
+                None => {
+                    return Err(AetherError::OutOfBounds {
+                        index: (j + 1) * dim,
+                        limit: b_bag.len(),
+                    })
+                }
             };
             let cost = simd_euclidean_distance_squared(a_vec, b_vec);
             if cost > max_cost {
@@ -203,7 +213,12 @@ pub fn sinkhorn_knopp_with_workspace(
         for i in 0..n {
             let k_row = match k_mat.get(i * m..(i + 1) * m) {
                 Some(r) => r,
-                None => return Err(AetherError::OutOfBounds { index: (i + 1) * m, limit: k_mat.len() }),
+                None => {
+                    return Err(AetherError::OutOfBounds {
+                        index: (i + 1) * m,
+                        limit: k_mat.len(),
+                    })
+                }
             };
             let kv = simd_dot_product(k_row, v_vec);
             if let Some(kv_ref) = kv_buf.get_mut(i) {
@@ -220,7 +235,11 @@ pub fn sinkhorn_knopp_with_workspace(
         // Update u_i = mu_i / (K v)_i
         for i in 0..n {
             if let (Some(u_ref), Some(&kv)) = (u_vec.get_mut(i), kv_buf.get(i)) {
-                *u_ref = if kv > f32::MIN_POSITIVE { mu_i / kv } else { 0.0 };
+                *u_ref = if kv > f32::MIN_POSITIVE {
+                    mu_i / kv
+                } else {
+                    0.0
+                };
             }
         }
 
@@ -235,7 +254,12 @@ pub fn sinkhorn_knopp_with_workspace(
             };
             let k_row = match k_mat.get(i * m..(i + 1) * m) {
                 Some(r) => r,
-                None => return Err(AetherError::OutOfBounds { index: (i + 1) * m, limit: k_mat.len() }),
+                None => {
+                    return Err(AetherError::OutOfBounds {
+                        index: (i + 1) * m,
+                        limit: k_mat.len(),
+                    })
+                }
             };
             simd_axpy(u_val, k_row, ktu_buf);
         }
@@ -245,7 +269,11 @@ pub fn sinkhorn_knopp_with_workspace(
         for (v_ref, &sum) in v_vec.iter_mut().zip(ktu_buf.iter()) {
             let col_sum = *v_ref * sum;
             current_err_v += (col_sum - nu_j).abs();
-            *v_ref = if sum > f32::MIN_POSITIVE { nu_j / sum } else { 0.0 };
+            *v_ref = if sum > f32::MIN_POSITIVE {
+                nu_j / sum
+            } else {
+                0.0
+            };
         }
 
         if iter > 0 {
@@ -270,11 +298,9 @@ pub fn sinkhorn_knopp_with_workspace(
             None => 0.0,
         };
         for j in 0..m {
-            if let (Some(&k_val), Some(&v_val), Some(&c_val)) = (
-                k_mat.get(i * m + j),
-                v_vec.get(j),
-                c_mat.get(i * m + j),
-            ) {
+            if let (Some(&k_val), Some(&v_val), Some(&c_val)) =
+                (k_mat.get(i * m + j), v_vec.get(j), c_mat.get(i * m + j))
+            {
                 let p_ij = u_val * k_val * v_val;
                 total_cost += p_ij * c_val;
                 if p_ij > 1e-12 {
@@ -395,7 +421,10 @@ fn sinkhorn_log_domain_internal(
         // Marginal check
         err_u = 0.0;
         for i in 0..n {
-            let f = match f_vec.get(i) { Some(&v) => v, None => 0.0 };
+            let f = match f_vec.get(i) {
+                Some(&v) => v,
+                None => 0.0,
+            };
             let mut p_row = 0.0f32;
             for j in 0..m {
                 if let (Some(&g), Some(&c)) = (g_vec.get(j), c_mat.get(i * m + j)) {
@@ -409,7 +438,10 @@ fn sinkhorn_log_domain_internal(
 
         err_v = 0.0;
         for j in 0..m {
-            let g = match g_vec.get(j) { Some(&v) => v, None => 0.0 };
+            let g = match g_vec.get(j) {
+                Some(&v) => v,
+                None => 0.0,
+            };
             let mut p_col = 0.0f32;
             for i in 0..n {
                 if let (Some(&f), Some(&c)) = (f_vec.get(i), c_mat.get(i * m + j)) {
@@ -430,7 +462,10 @@ fn sinkhorn_log_domain_internal(
     // Compute cost
     let mut total_cost = 0.0f32;
     for i in 0..n {
-        let f = match f_vec.get(i) { Some(&v) => v, None => 0.0 };
+        let f = match f_vec.get(i) {
+            Some(&v) => v,
+            None => 0.0,
+        };
         for j in 0..m {
             if let (Some(&g), Some(&c)) = (g_vec.get(j), c_mat.get(i * m + j)) {
                 let c_shifted = c - min_cost;

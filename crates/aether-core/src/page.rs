@@ -20,17 +20,7 @@ use crate::hlc::HlcTimestamp;
 /// - 32..64 (32B): Intra-page CSR Offset Table (16 x u16)
 #[repr(C, align(64))]
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Pod,
-    Zeroable,
-    FromBytes,
-    IntoBytes,
-    KnownLayout,
-    Immutable,
+    Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable, FromBytes, IntoBytes, KnownLayout, Immutable,
 )]
 pub struct PageHeader {
     /// CRC32C checksum of the page header payload (bytes 4..64).
@@ -95,16 +85,7 @@ impl PageHeader {
 /// - 0832..2880 (2048B): Quantized neighbor vectors (64 neighbors x 32B)
 /// - 2880..4096 (1216B): Cellular Sheaf restriction maps / BF16 edge weights
 #[repr(C, align(4096))]
-#[derive(
-    Clone,
-    Copy,
-    Pod,
-    Zeroable,
-    FromBytes,
-    IntoBytes,
-    KnownLayout,
-    Immutable,
-)]
+#[derive(Clone, Copy, Pod, Zeroable, FromBytes, IntoBytes, KnownLayout, Immutable)]
 pub struct TensorGraphPage {
     /// Cache-line aligned page header (64 bytes).
     pub header: PageHeader,
@@ -224,4 +205,3 @@ impl TensorGraphPage {
         Ok(page_mut)
     }
 }
-

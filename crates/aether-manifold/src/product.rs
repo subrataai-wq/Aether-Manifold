@@ -10,10 +10,10 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use aether_core::error::AetherError;
 use crate::euclidean::{euclidean_distance_squared, scalar_euclidean_distance_squared_checked};
 use crate::hyperbolic::{lorentz_distance_squared, scalar_lorentz_distance};
 use crate::spherical::{scalar_spherical_distance, spherical_distance_squared};
+use aether_core::error::AetherError;
 
 /// Specification for a hyperbolic Lorentz component $\mathbb{H}_{\kappa}^{d_H}$.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -114,11 +114,21 @@ pub fn product_manifold_distance_squared(
         let next_offset = offset + h.dim;
         let sub_u = match u.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: u.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: u.len(),
+                })
+            }
         };
         let sub_v = match v.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: v.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: v.len(),
+                })
+            }
         };
         let d2 = lorentz_distance_squared(sub_u, sub_v, h.kappa)?;
         total_d2 += h.weight * d2;
@@ -129,11 +139,21 @@ pub fn product_manifold_distance_squared(
         let next_offset = offset + s.dim;
         let sub_u = match u.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: u.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: u.len(),
+                })
+            }
         };
         let sub_v = match v.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: v.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: v.len(),
+                })
+            }
         };
         let d2 = spherical_distance_squared(sub_u, sub_v, s.tau)?;
         total_d2 += s.weight * d2;
@@ -144,11 +164,21 @@ pub fn product_manifold_distance_squared(
         let next_offset = offset + e.dim;
         let sub_u = match u.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: u.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: u.len(),
+                })
+            }
         };
         let sub_v = match v.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: v.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: v.len(),
+                })
+            }
         };
         let d2 = euclidean_distance_squared(sub_u, sub_v)?;
         total_d2 += e.weight * d2;
@@ -194,11 +224,21 @@ pub fn scalar_product_manifold_distance_squared(
         let next_offset = offset + h.dim;
         let sub_u = match u.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: u.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: u.len(),
+                })
+            }
         };
         let sub_v = match v.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: v.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: v.len(),
+                })
+            }
         };
         let d = scalar_lorentz_distance(sub_u, sub_v, h.kappa)?;
         total_d2 += h.weight * (d * d);
@@ -209,11 +249,21 @@ pub fn scalar_product_manifold_distance_squared(
         let next_offset = offset + s.dim;
         let sub_u = match u.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: u.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: u.len(),
+                })
+            }
         };
         let sub_v = match v.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: v.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: v.len(),
+                })
+            }
         };
         let d = scalar_spherical_distance(sub_u, sub_v, s.tau)?;
         total_d2 += s.weight * (d * d);
@@ -224,11 +274,21 @@ pub fn scalar_product_manifold_distance_squared(
         let next_offset = offset + e.dim;
         let sub_u = match u.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: u.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: u.len(),
+                })
+            }
         };
         let sub_v = match v.get(offset..next_offset) {
             Some(s) => s,
-            None => return Err(AetherError::OutOfBounds { index: next_offset, limit: v.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: next_offset,
+                    limit: v.len(),
+                })
+            }
         };
         let d2 = scalar_euclidean_distance_squared_checked(sub_u, sub_v)?;
         total_d2 += e.weight * d2;
@@ -246,4 +306,3 @@ pub fn scalar_product_manifold_distance(
     let d2 = scalar_product_manifold_distance_squared(config, u, v)?;
     Ok(libm::sqrtf(d2))
 }
-

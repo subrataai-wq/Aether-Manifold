@@ -1,0 +1,90 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  quality:
+    name: Code Quality (fmt & clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+      - name: Run Clippy Linter
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test-matrix:
+    name: Test Suite (${{ matrix.os }})
+    needs: quality
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify Compile-Time Invariants & Static Assertions
+        run: cargo test --workspace --lib static_assert_
+      - name: Run All Workspace Tests
+        run: cargo test --workspace --all-targets
+
+  exit-gates:
+    name: Hardware Exit Gates (${{ matrix.os }})
+    needs: quality
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Run Phase 0 Exit Gates (Release)
+        run: cargo test -p aether-verify --test phase0_exit_gate_tests --release -- --nocapture
+      - name: Run Phase 1 Exit Gates (Release)
+        run: cargo test -p aether-verify --test phase1_exit_gate_tests --release -- --nocapture
+
+  tla-formal-proofs:
+    name: TLA+ Formal Verification (TLC & Rust Oracle)
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Setup Java 17 for TLC
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Download TLA+ Tools (tlc2.TLC)
+        run: |
+          curl -L -o tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+      - name: Run TLC Model Checker on HLC Causal Consistency
+        run: |
+          java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC specs/tla/HlcCausalConsistency.tla -config specs/tla/HlcCausalConsistency.cfg -workers auto
+      - name: Run TLC Model Checker on KLSM Boundary Compaction
+        run: |
+          java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC specs/tla/KlsmBoundaryCompaction.tla -config specs/tla/KlsmBoundaryCompaction.cfg -workers auto
+      - name: Run Rust TLA+ State Machine Protocol Invariant Tests
+        run: cargo test -p aether-verify --test tla_protocol_invariants -- --nocapture
+

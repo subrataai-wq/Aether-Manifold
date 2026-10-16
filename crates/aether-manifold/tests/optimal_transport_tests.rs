@@ -44,16 +44,8 @@ fn gate_zero_hot_path_allocations_on_sinkhorn() {
     {
         let guard = HotPathAllocGuard::enter();
 
-        let res = sinkhorn_knopp_with_workspace(
-            &a_bag,
-            n,
-            &b_bag,
-            m,
-            dim,
-            &config,
-            &mut workspace,
-        )
-        .unwrap();
+        let res = sinkhorn_knopp_with_workspace(&a_bag, n, &b_bag, m, dim, &config, &mut workspace)
+            .unwrap();
 
         assert_eq!(
             guard.alloc_count(),
@@ -114,9 +106,7 @@ fn test_sinkhorn_convergence_and_identity() {
     let n = 3;
     let dim = 4;
     let a_bag = [
-        1.0f32, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0,
+        1.0f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
     ];
 
     let config = SinkhornConfig {
@@ -127,18 +117,22 @@ fn test_sinkhorn_convergence_and_identity() {
 
     // Self-divergence should be exactly 0
     let s_aa = debiased_sinkhorn_divergence(&a_bag, n, &a_bag, n, dim, &config).unwrap();
-    assert_eq!(s_aa, 0.0, "Debiased Sinkhorn divergence of identical sets must be 0");
+    assert_eq!(
+        s_aa, 0.0,
+        "Debiased Sinkhorn divergence of identical sets must be 0"
+    );
 
     let b_bag = [
-        2.0f32, 0.0, 0.0, 0.0,
-        0.0, 2.0, 0.0, 0.0,
-        0.0, 0.0, 2.0, 0.0,
+        2.0f32, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0,
     ];
 
     let s_ab = debiased_sinkhorn_divergence(&a_bag, n, &b_bag, n, dim, &config).unwrap();
     let s_ba = debiased_sinkhorn_divergence(&b_bag, n, &a_bag, n, dim, &config).unwrap();
 
-    assert!(s_ab > 0.0, "Distance between distinct bags must be positive");
+    assert!(
+        s_ab > 0.0,
+        "Distance between distinct bags must be positive"
+    );
     assert!((s_ab - s_ba).abs() < 1e-5, "Divergence must be symmetric");
 }
 
@@ -149,16 +143,11 @@ fn test_sinkhorn_marginal_convergence() {
     let dim = 4;
 
     let a_bag = [
-        0.5f32, 1.0, 0.2, 0.8,
-        1.2, 0.3, 0.9, 0.1,
-        0.0, 0.5, 1.5, 0.4,
-        0.7, 0.8, 0.3, 0.2,
+        0.5f32, 1.0, 0.2, 0.8, 1.2, 0.3, 0.9, 0.1, 0.0, 0.5, 1.5, 0.4, 0.7, 0.8, 0.3, 0.2,
     ];
 
     let b_bag = [
-        0.1f32, 0.9, 0.4, 0.6,
-        1.0, 0.2, 0.8, 0.3,
-        0.5, 0.5, 0.5, 0.5,
+        0.1f32, 0.9, 0.4, 0.6, 1.0, 0.2, 0.8, 0.3, 0.5, 0.5, 0.5, 0.5,
     ];
 
     let config = SinkhornConfig {
@@ -168,7 +157,10 @@ fn test_sinkhorn_marginal_convergence() {
     };
 
     let res = sinkhorn_knopp(&a_bag, n, &b_bag, m, dim, &config).unwrap();
-    assert!(res.converged, "Sinkhorn must converge within max iterations");
+    assert!(
+        res.converged,
+        "Sinkhorn must converge within max iterations"
+    );
     assert!(res.iterations <= 50, "Iterations must not exceed 50");
     assert!(
         res.marginal_error_u <= 1e-4,
@@ -190,15 +182,11 @@ fn test_sinkhorn_log_domain_stabilization_small_epsilon() {
     let dim = 4;
 
     let a_bag = [
-        10.0f32, 2.0, 5.0, 1.0,
-        3.0, 8.0, 0.5, 4.0,
-        1.0, 1.0, 9.0, 2.0,
+        10.0f32, 2.0, 5.0, 1.0, 3.0, 8.0, 0.5, 4.0, 1.0, 1.0, 9.0, 2.0,
     ];
 
     let b_bag = [
-        0.0f32, 1.0, 2.0, 3.0,
-        4.0, 5.0, 6.0, 7.0,
-        8.0, 9.0, 1.0, 2.0,
+        0.0f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 1.0, 2.0,
     ];
 
     // Extreme small epsilon: 1e-4 where exp(-C/eps) would otherwise underflow to 0
@@ -214,12 +202,30 @@ fn test_sinkhorn_log_domain_stabilization_small_epsilon() {
     // "verify zero SIMD floating-point underflow (0.0) or overflow (Inf) during scaling."
     assert!(!res.cost.is_nan(), "Cost must not be NaN");
     assert!(!res.cost.is_infinite(), "Cost must not be Infinite");
-    assert!(res.cost > 0.0, "Cost must be strictly positive (no underflow)");
-    assert!(!res.regularized_cost.is_nan(), "Regularized cost must not be NaN");
-    assert!(!res.regularized_cost.is_infinite(), "Regularized cost must not be Infinite");
-    assert!(!res.marginal_error_u.is_nan(), "Marginal error must not be NaN");
-    assert!(!res.marginal_error_v.is_nan(), "Marginal error must not be NaN");
-    assert!(res.marginal_error_v < 0.05, "Target marginal error must not diverge");
+    assert!(
+        res.cost > 0.0,
+        "Cost must be strictly positive (no underflow)"
+    );
+    assert!(
+        !res.regularized_cost.is_nan(),
+        "Regularized cost must not be NaN"
+    );
+    assert!(
+        !res.regularized_cost.is_infinite(),
+        "Regularized cost must not be Infinite"
+    );
+    assert!(
+        !res.marginal_error_u.is_nan(),
+        "Marginal error must not be NaN"
+    );
+    assert!(
+        !res.marginal_error_v.is_nan(),
+        "Marginal error must not be NaN"
+    );
+    assert!(
+        res.marginal_error_v < 0.05,
+        "Target marginal error must not diverge"
+    );
 }
 
 #[test]
@@ -284,4 +290,3 @@ fn test_asymmetric_cardinality_identical_points_divergence_is_zero() {
         s_ba
     );
 }
-

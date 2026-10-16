@@ -1,0 +1,33 @@
+name: Deep Property Fuzzing
+
+on:
+  schedule:
+    - cron: '0 3 * * 0' # Every Sunday at 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      proptest_cases:
+        description: 'Number of proptest cases per property'
+        required: false
+        default: '50000'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  deep-proptests:
+    name: Riemannian & Sheaf Fuzzing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Run Manifold Property Fuzzing (Release)
+        env:
+          PROPTEST_CASES: ${{ github.event.inputs.proptest_cases || '50000' }}
+        run: cargo test -p aether-verify --test manifold_proptests --release -- --nocapture
+      - name: Run Optimal Transport Property Fuzzing (Release)
+        env:
+          PROPTEST_CASES: ${{ github.event.inputs.proptest_cases || '50000' }}
+        run: cargo test -p aether-verify --test optimal_transport_proptests --release -- --nocapture
+

@@ -4,11 +4,11 @@
 //! private `L0MorphismLog`, and dedicated wait-free `SpscRingBuffer` queue pair for asynchronous
 //! 4KB direct page I/O / speculative prefetch without any global locks or heap allocations.
 
-use aether_core::error::AetherError;
-use aether_core::hlc::{HlcClock, HlcTimestamp};
 use crate::l0_mvcc::L0MorphismLog;
 use crate::page_arena::AlignedPageArena;
 use crate::spsc::SpscRingBuffer;
+use aether_core::error::AetherError;
+use aether_core::hlc::{HlcClock, HlcTimestamp};
 
 /// Operation opcode for asynchronous direct page I/O.
 #[repr(u8)]
@@ -50,7 +50,9 @@ pub struct CoreShardRuntime<const D: usize, const L0_CAP: usize, const IO_DEPTH:
     pub cq: SpscRingBuffer<IoCompletionCqe, IO_DEPTH>,
 }
 
-impl<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize> CoreShardRuntime<D, L0_CAP, IO_DEPTH> {
+impl<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize>
+    CoreShardRuntime<D, L0_CAP, IO_DEPTH>
+{
     /// Cold-path initialization of a core shard runtime.
     pub fn new(core_id: usize, arena_capacity: usize, initial_ts: HlcTimestamp) -> Self {
         Self {
@@ -153,4 +155,3 @@ impl<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize> CoreShardRuntim
         processed
     }
 }
-

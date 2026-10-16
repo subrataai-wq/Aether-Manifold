@@ -81,7 +81,10 @@ fn gate_phase1_klsm_ingestion_throughput_and_recall() {
         HlcTimestamp::pack(1_000_000, 0),
     );
 
-    let page_slot = shard.arena.allocate_page(1, HlcTimestamp::pack(1_000_000, 1), 0).unwrap();
+    let page_slot = shard
+        .arena
+        .allocate_page(1, HlcTimestamp::pack(1_000_000, 1), 0)
+        .unwrap();
 
     // Prepare 64 candidate neighbors in base tangent space T_{x_0} M
     let mut ground_truth_tangents = [[0.0f32; D]; 64];
@@ -144,7 +147,10 @@ fn gate_phase1_klsm_ingestion_throughput_and_recall() {
     // Target: Projected 64-core sustained throughput >= 1.5 x 10^6 vectors + edges / sec
     // Strictly 0 hot-path heap allocations inside HotPathAllocGuard
     const INGESTION_OPS_PER_CORE: usize = 50_000;
-    let mut cqes = [IoCompletionCqe { result: 0, user_data: 0 }; 16];
+    let mut cqes = [IoCompletionCqe {
+        result: 0,
+        user_data: 0,
+    }; 16];
 
     let base_v = [0.0f32; D];
     let mut commit_v = [0.0f32; D];
@@ -200,8 +206,7 @@ fn gate_phase1_klsm_ingestion_throughput_and_recall() {
         (dur, ())
     };
 
-    let single_core_ops_sec =
-        (INGESTION_OPS_PER_CORE as f64) / ingestion_elapsed.as_secs_f64();
+    let single_core_ops_sec = (INGESTION_OPS_PER_CORE as f64) / ingestion_elapsed.as_secs_f64();
     let projected_64_core_ops_sec = single_core_ops_sec * 64.0;
 
     println!(
@@ -214,10 +219,7 @@ fn gate_phase1_klsm_ingestion_throughput_and_recall() {
          Throughput Criterion:         >= 1.50 x 10^6 ops/sec\n\
          Hot-Path Heap Allocations:    0 bytes\n\
          ===================================================================",
-        INGESTION_OPS_PER_CORE,
-        ingestion_elapsed,
-        single_core_ops_sec,
-        projected_64_core_ops_sec
+        INGESTION_OPS_PER_CORE, ingestion_elapsed, single_core_ops_sec, projected_64_core_ops_sec
     );
 
     assert!(
@@ -247,7 +249,8 @@ fn gate_phase1_klsm_ingestion_throughput_and_recall() {
         q_tangent[4] = 0.0;
 
         let mut q_point = [0.0f32; D];
-        aether_manifold::tangent::product_exp_map(&config, &base_origin, &q_tangent, &mut q_point).unwrap();
+        aether_manifold::tangent::product_exp_map(&config, &base_origin, &q_tangent, &mut q_point)
+            .unwrap();
 
         // 4a. Ground-Truth Exact Geodesic Distances
         let mut exact_distances: Vec<(usize, f32)> = ground_truth_points
@@ -259,7 +262,11 @@ fn gate_phase1_klsm_ingestion_throughput_and_recall() {
             })
             .collect();
         exact_distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        let exact_top10: Vec<usize> = exact_distances.iter().take(10).map(|(idx, _)| *idx).collect();
+        let exact_top10: Vec<usize> = exact_distances
+            .iter()
+            .take(10)
+            .map(|(idx, _)| *idx)
+            .collect();
 
         // 4b. Quantized AT-RQ Geodesic Distance Scoring inside HotPathAllocGuard
         let qc_norm_sq = simd_dot_product(&q_tangent, &q_tangent);
@@ -293,7 +300,11 @@ fn gate_phase1_klsm_ingestion_throughput_and_recall() {
             .map(|(idx, &d)| (idx, d))
             .collect();
         quantized_candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        let quantized_top10: Vec<usize> = quantized_candidates.iter().take(10).map(|(idx, _)| *idx).collect();
+        let quantized_top10: Vec<usize> = quantized_candidates
+            .iter()
+            .take(10)
+            .map(|(idx, _)| *idx)
+            .collect();
 
         // 4d. Compute Recall@10 Overlap
         let overlap = exact_top10
@@ -333,4 +344,3 @@ fn gate_phase1_klsm_ingestion_throughput_and_recall() {
         avg_recall_at_10
     );
 }
-

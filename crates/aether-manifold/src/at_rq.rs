@@ -7,9 +7,9 @@
 //! In strict compliance with roadmap.md Sections 2.4, 3.2, 3.4, and AGENTS.md Rule 3.1
 //! (strictly 0 hot-path heap allocations).
 
+use crate::simd::{simd_dot_product, simd_euclidean_distance_squared};
 use aether_core::error::AetherError;
 use aether_core::page::TensorGraphPage;
-use crate::simd::{simd_dot_product, simd_euclidean_distance_squared};
 
 /// Exactly 32-byte packed representation of a quantized neighbor vector for TensorGraphPage.
 ///
@@ -166,7 +166,12 @@ pub fn at_rq_encode_neighbor(
     for s in 0..24 {
         let sub_v = match v_tangent.get(s * d_sub..(s + 1) * d_sub) {
             Some(slice) => slice,
-            None => return Err(AetherError::OutOfBounds { index: (s + 1) * d_sub, limit: d }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: (s + 1) * d_sub,
+                    limit: d,
+                })
+            }
         };
 
         let mut best_dist = f32::INFINITY;
@@ -176,7 +181,12 @@ pub fn at_rq_encode_neighbor(
             let offset = (s * centroids_per_subspace + c) * d_sub;
             let centroid = match codebooks.get(offset..offset + d_sub) {
                 Some(slice) => slice,
-                None => return Err(AetherError::OutOfBounds { index: offset + d_sub, limit: codebooks.len() }),
+                None => {
+                    return Err(AetherError::OutOfBounds {
+                        index: offset + d_sub,
+                        limit: codebooks.len(),
+                    })
+                }
             };
 
             let dist = simd_euclidean_distance_squared(sub_v, centroid);
@@ -235,11 +245,21 @@ pub fn at_rq_decode_neighbor(
         let offset = (s * centroids_per_subspace + code_val) * d_sub;
         let centroid = match codebooks.get(offset..offset + d_sub) {
             Some(slice) => slice,
-            None => return Err(AetherError::OutOfBounds { index: offset + d_sub, limit: codebooks.len() }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: offset + d_sub,
+                    limit: codebooks.len(),
+                })
+            }
         };
         let out_sub = match out_tangent.get_mut(s * d_sub..(s + 1) * d_sub) {
             Some(slice) => slice,
-            None => return Err(AetherError::OutOfBounds { index: (s + 1) * d_sub, limit: d }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: (s + 1) * d_sub,
+                    limit: d,
+                })
+            }
         };
 
         for (out_val, &c_val) in out_sub.iter_mut().zip(centroid.iter()) {
@@ -280,14 +300,24 @@ pub fn at_rq_build_query_lut(
     for s in 0..24 {
         let q_sub = match qc.get(s * d_sub..(s + 1) * d_sub) {
             Some(slice) => slice,
-            None => return Err(AetherError::OutOfBounds { index: (s + 1) * d_sub, limit: d }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: (s + 1) * d_sub,
+                    limit: d,
+                })
+            }
         };
 
         for c in 0..centroids_per_subspace {
             let offset = (s * centroids_per_subspace + c) * d_sub;
             let centroid = match codebooks.get(offset..offset + d_sub) {
                 Some(slice) => slice,
-                None => return Err(AetherError::OutOfBounds { index: offset + d_sub, limit: codebooks.len() }),
+                None => {
+                    return Err(AetherError::OutOfBounds {
+                        index: offset + d_sub,
+                        limit: codebooks.len(),
+                    })
+                }
             };
 
             let dot = simd_dot_product(q_sub, centroid);
@@ -317,7 +347,11 @@ pub fn curvature_corrected_tangent_distance_squared(
     let cross_term = (qc_norm_sq * vu_norm_sq - dot_product * dot_product).max(0.0);
     let correction = (kappa / 3.0) * cross_term;
     let d2 = euclidean_d2 - correction;
-    if d2 < 0.0 { 0.0 } else { d2 }
+    if d2 < 0.0 {
+        0.0
+    } else {
+        d2
+    }
 }
 
 /// Pad a 1024-dimensional tangent vector to 1032 dimensions (24 subspaces $\times$ 43 dims)
@@ -387,7 +421,12 @@ fn score_page_neighbors_const_k<const K: usize>(
 
     let active_codes = match codes.get(0..active_count) {
         Some(s) => s,
-        None => return Err(AetherError::OutOfBounds { index: active_count, limit: codes.len() }),
+        None => {
+            return Err(AetherError::OutOfBounds {
+                index: active_count,
+                limit: codes.len(),
+            })
+        }
     };
 
     // Fast-path whole-page bounds validation using 64-bit word bitwise OR
@@ -413,7 +452,10 @@ fn score_page_neighbors_const_k<const K: usize>(
             for code in active_codes {
                 for &c in &code.subspace_codes {
                     if (c as usize) >= K {
-                        return Err(AetherError::OutOfBounds { index: c as usize, limit: K });
+                        return Err(AetherError::OutOfBounds {
+                            index: c as usize,
+                            limit: K,
+                        });
                     }
                 }
             }
@@ -422,7 +464,10 @@ fn score_page_neighbors_const_k<const K: usize>(
         for code in active_codes {
             for &c in &code.subspace_codes {
                 if (c as usize) >= K {
-                    return Err(AetherError::OutOfBounds { index: c as usize, limit: K });
+                    return Err(AetherError::OutOfBounds {
+                        index: c as usize,
+                        limit: K,
+                    });
                 }
             }
         }
@@ -588,7 +633,9 @@ pub fn at_rq_score_page_neighbors(
 ) -> Result<(), AetherError> {
     match centroids_per_subspace {
         16 => score_page_neighbors_const_k::<16>(qc_norm_sq, query_lut, kappa, page, out_distances),
-        256 => score_page_neighbors_const_k::<256>(qc_norm_sq, query_lut, kappa, page, out_distances),
+        256 => {
+            score_page_neighbors_const_k::<256>(qc_norm_sq, query_lut, kappa, page, out_distances)
+        }
         0 => Err(AetherError::InvalidBufferSize {
             actual: 0,
             expected: 1,

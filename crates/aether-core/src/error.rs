@@ -26,7 +26,9 @@ pub enum AetherError {
     },
 
     /// Pre-allocated scratchpad memory exhausted.
-    #[error("Scratchpad exhausted: requested {requested} bytes, but only {available} bytes available")]
+    #[error(
+        "Scratchpad exhausted: requested {requested} bytes, but only {available} bytes available"
+    )]
     ScratchpadExhausted {
         /// Requested byte count.
         requested: usize,
@@ -44,7 +46,9 @@ pub enum AetherError {
     },
 
     /// Buffer size does not match exact page or tensor requirement.
-    #[error("Invalid buffer size: buffer length {actual} does not match required {expected} bytes")]
+    #[error(
+        "Invalid buffer size: buffer length {actual} does not match required {expected} bytes"
+    )]
     InvalidBufferSize {
         /// Observed buffer length in bytes.
         actual: usize,
@@ -75,4 +79,3 @@ pub enum AetherError {
         count: usize,
     },
 }
-

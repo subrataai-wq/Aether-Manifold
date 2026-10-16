@@ -120,7 +120,12 @@ impl<const D: usize, const CAP: usize> L0MorphismLog<D, CAP> {
         let slot = self.head % CAP;
         let entry = match self.entries.get_mut(slot) {
             Some(e) => e,
-            None => return Err(AetherError::OutOfBounds { index: slot, limit: CAP }),
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: slot,
+                    limit: CAP,
+                })
+            }
         };
 
         *entry = TangentDeltaEntry {
@@ -201,7 +206,10 @@ impl<const D: usize, const CAP: usize> L0MorphismLog<D, CAP> {
         } else if tau_q >= entry.tau_commit {
             1.0f32
         } else {
-            let total_span = entry.tau_commit.as_u64().saturating_sub(entry.tau_base.as_u64());
+            let total_span = entry
+                .tau_commit
+                .as_u64()
+                .saturating_sub(entry.tau_base.as_u64());
             let q_span = tau_q.as_u64().saturating_sub(entry.tau_base.as_u64());
             if total_span > 0 {
                 (q_span as f32 / total_span as f32).clamp(0.0, 1.0)
@@ -253,4 +261,3 @@ impl<const D: usize, const CAP: usize> Default for L0MorphismLog<D, CAP> {
         Self::new()
     }
 }
-

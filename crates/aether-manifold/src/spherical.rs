@@ -8,9 +8,11 @@
 //! $$d_{\mathbb{S}_{\tau}}(u, v) = \frac{1}{\sqrt{\tau}} \arccos\left( \operatorname{clamp}\left( \langle u, v \rangle, -1.0, 1.0 \right) \right)$$
 //! $$d_{\mathbb{S}_{\tau}}^2(u, v) = \left( d_{\mathbb{S}_{\tau}}(u, v) \right)^2$$
 
-use aether_core::error::AetherError;
 use crate::hyperbolic::HORIZON_EPSILON;
-use crate::simd::{scalar_dot_product, scalar_sum_of_squares, simd_dot_product, simd_sum_of_squares};
+use crate::simd::{
+    scalar_dot_product, scalar_sum_of_squares, simd_dot_product, simd_sum_of_squares,
+};
+use aether_core::error::AetherError;
 
 /// Compute the geodesic distance $d_{\mathbb{S}_\tau}(u, v)$ on a hypersphere with positive curvature $\tau > 0$.
 ///

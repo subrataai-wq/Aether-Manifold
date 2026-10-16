@@ -10,10 +10,12 @@
 use std::sync::Arc;
 use std::thread;
 
-use aether_core::{reset_hot_path_counters, HotPathAllocGuard};
 use aether_core::hlc::HlcTimestamp;
-use aether_manifold::at_rq::{at_rq_build_query_lut, at_rq_score_page_neighbors, CompactNeighborCode};
-use aether_manifold::product::{ProductManifoldConfig, EuclideanSpec};
+use aether_core::{reset_hot_path_counters, HotPathAllocGuard};
+use aether_manifold::at_rq::{
+    at_rq_build_query_lut, at_rq_score_page_neighbors, CompactNeighborCode,
+};
+use aether_manifold::product::{EuclideanSpec, ProductManifoldConfig};
 use aether_storage::l0_mvcc::L0MorphismLog;
 use aether_storage::page_arena::AlignedPageArena;
 use aether_storage::shard_runtime::{CoreShardRuntime, IoCompletionCqe};
@@ -148,7 +150,12 @@ fn test_4kb_tensor_page_arena_and_zero_io_1hop_adc() {
     .unwrap();
 
     for (i, &d2) in out_distances.iter().enumerate() {
-        assert!(d2.is_finite() && d2 >= 0.0, "Neighbor {} invalid distance: {}", i, d2);
+        assert!(
+            d2.is_finite() && d2 >= 0.0,
+            "Neighbor {} invalid distance: {}",
+            i,
+            d2
+        );
     }
 
     arena.deallocate_page(slot).unwrap();
@@ -161,7 +168,10 @@ fn test_l0_geodesic_mvcc_time_travel_snapshots() {
     let config = ProductManifoldConfig {
         hyperbolic: vec![],
         spherical: vec![],
-        euclidean: Some(EuclideanSpec { dim: 4, weight: 1.0 }),
+        euclidean: Some(EuclideanSpec {
+            dim: 4,
+            weight: 1.0,
+        }),
     };
 
     let mut log = L0MorphismLog::<4, 16>::new();
@@ -185,7 +195,9 @@ fn test_l0_geodesic_mvcc_time_travel_snapshots() {
     .unwrap();
 
     assert_eq!(log.len(), 1);
-    let entry = log.get_latest_entry(vertex_id).expect("Entry must be indexed");
+    let entry = log
+        .get_latest_entry(vertex_id)
+        .expect("Entry must be indexed");
     assert_eq!(entry.vertex_id, vertex_id);
     assert_eq!(entry.velocity_delta, [10.0, 20.0, -10.0, 30.0]);
 
@@ -214,7 +226,10 @@ fn test_boundary_only_voronoi_compaction_equivalence() {
     let config = ProductManifoldConfig {
         hyperbolic: vec![],
         spherical: vec![],
-        euclidean: Some(EuclideanSpec { dim: 2, weight: 1.0 }),
+        euclidean: Some(EuclideanSpec {
+            dim: 2,
+            weight: 1.0,
+        }),
     };
 
     // Modified Voronoi cell A at [100.0, 100.0] with radius R_A = 2.0
@@ -259,7 +274,9 @@ fn test_boundary_only_voronoi_compaction_equivalence() {
     let mut slots = vec![0usize, 1usize];
     let certs = vec![cert_a, cert_b];
 
-    let stats = execute_boundary_only_compaction(&config, &vertices, &knn_dists, &mut slots, &certs).unwrap();
+    let stats =
+        execute_boundary_only_compaction(&config, &vertices, &knn_dists, &mut slots, &certs)
+            .unwrap();
     assert_eq!(stats.total_vertices, 2);
     assert_eq!(stats.interior_spliced, 1);
     assert_eq!(stats.boundary_relinked, 1);
@@ -270,13 +287,19 @@ fn gate_zero_hot_path_allocations_storage_engine() {
     let config = ProductManifoldConfig {
         hyperbolic: vec![],
         spherical: vec![],
-        euclidean: Some(EuclideanSpec { dim: 4, weight: 1.0 }),
+        euclidean: Some(EuclideanSpec {
+            dim: 4,
+            weight: 1.0,
+        }),
     };
 
     let mut shard = CoreShardRuntime::<4, 64, 64>::new(0, 32, HlcTimestamp::pack(1_000_000, 0));
 
     // Allocate page slot on cold path
-    let slot = shard.arena.allocate_page(1, HlcTimestamp::pack(1_000_000, 1), 0).unwrap();
+    let slot = shard
+        .arena
+        .allocate_page(1, HlcTimestamp::pack(1_000_000, 1), 0)
+        .unwrap();
 
     let cert = VoronoiCellCertificate {
         cell_id: 1,
@@ -289,7 +312,10 @@ fn gate_zero_hot_path_allocations_storage_engine() {
     let knn_dists = [5.0f32];
     let mut page_slots = [slot];
 
-    let mut cqes = [IoCompletionCqe { result: 0, user_data: 0 }; 8];
+    let mut cqes = [IoCompletionCqe {
+        result: 0,
+        user_data: 0,
+    }; 8];
 
     let base_state = [1.0f32, 2.0, 3.0, 4.0];
     let commit_state = [1.1f32, 2.2, 3.3, 4.4];
@@ -300,12 +326,15 @@ fn gate_zero_hot_path_allocations_storage_engine() {
     let guard = HotPathAllocGuard::enter();
 
     // 1. SPSC push and pop (0 allocs)
-    shard.sq.try_push(aether_storage::IoSubmissionSqe {
-        opcode: aether_storage::IoOpcode::ReadPage,
-        page_id: 1,
-        arena_slot: slot,
-        user_data: 1,
-    }).unwrap();
+    shard
+        .sq
+        .try_push(aether_storage::IoSubmissionSqe {
+            opcode: aether_storage::IoOpcode::ReadPage,
+            page_id: 1,
+            arena_slot: slot,
+            user_data: 1,
+        })
+        .unwrap();
     let _ = shard.process_pending_io();
     let dequeued = shard.poll_completions(8, &mut cqes);
     assert_eq!(dequeued, 1);
@@ -315,43 +344,46 @@ fn gate_zero_hot_path_allocations_storage_engine() {
     assert!(page.header.verify_checksum().is_ok());
 
     // 3. L0 geodesic MVCC delta record and state reconstruction (0 allocs)
-    let delta_slot = shard.l0_log.record_geodesic_delta(
-        &config,
-        42,
-        tau1,
-        &base_state,
-        tau2,
-        &commit_state,
-    ).unwrap();
+    let delta_slot = shard
+        .l0_log
+        .record_geodesic_delta(&config, 42, tau1, &base_state, tau2, &commit_state)
+        .unwrap();
     let entry = shard.l0_log.get_latest_entry(42).unwrap();
     assert_eq!(delta_slot, 0);
     let mut reconstructed = [0.0f32; 4];
-    shard.l0_log.reconstruct_state_at(
-        &config,
-        &base_state,
-        entry,
-        HlcTimestamp::pack(1_500_000, 0),
-        &mut reconstructed,
-    ).unwrap();
+    shard
+        .l0_log
+        .reconstruct_state_at(
+            &config,
+            &base_state,
+            entry,
+            HlcTimestamp::pack(1_500_000, 0),
+            &mut reconstructed,
+        )
+        .unwrap();
 
     // 4. Voronoi compaction evaluation (0 allocs)
     let decision = evaluate_voronoi_boundary_certificate(
         &config,
         &[0.0, 0.0, 0.0, 0.0],
         5.0,
-        match certs.first() { Some(c) => c, None => panic!() },
-    ).unwrap();
+        match certs.first() {
+            Some(c) => c,
+            None => panic!(),
+        },
+    )
+    .unwrap();
     assert_eq!(decision, CompactionDecision::BypassInteriorSplice);
 
-    let stats = execute_boundary_only_compaction(
-        &config,
-        &vertices,
-        &knn_dists,
-        &mut page_slots,
-        &certs,
-    ).unwrap();
+    let stats =
+        execute_boundary_only_compaction(&config, &vertices, &knn_dists, &mut page_slots, &certs)
+            .unwrap();
     assert_eq!(stats.interior_spliced, 1);
 
-    assert_eq!(guard.alloc_count(), 0, "Hot-path allocation detected in storage engine!");
+    assert_eq!(
+        guard.alloc_count(),
+        0,
+        "Hot-path allocation detected in storage engine!"
+    );
     assert_eq!(guard.allocated_bytes(), 0);
 }

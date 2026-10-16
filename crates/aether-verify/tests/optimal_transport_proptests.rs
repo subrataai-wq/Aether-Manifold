@@ -15,9 +15,7 @@
     clippy::float_cmp
 )]
 
-use aether_manifold::{
-    debiased_sinkhorn_divergence, sinkhorn_knopp, SinkhornConfig,
-};
+use aether_manifold::{debiased_sinkhorn_divergence, sinkhorn_knopp, SinkhornConfig};
 use proptest::prelude::*;
 
 fn normalize_bag(bag: &mut [f32], n: usize, dim: usize) {
@@ -150,4 +148,3 @@ proptest! {
         );
     }
 }
-

@@ -150,4 +150,3 @@ impl Drop for HotPathAllocGuard {
 
 /// Alias for `HotPathAllocGuard` per AGENTS.md.
 pub type HotPathGuard = HotPathAllocGuard;
-

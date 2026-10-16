@@ -29,11 +29,24 @@ impl<'a> WithSimd for DotProductKernel<'a> {
             let mut i = 0;
             let len = head_a.len();
             while i + 4 <= len {
-                if let (Some(&a0), Some(&b0), Some(&a1), Some(&b1), Some(&a2), Some(&b2), Some(&a3), Some(&b3)) = (
-                    head_a.get(i), head_b.get(i),
-                    head_a.get(i + 1), head_b.get(i + 1),
-                    head_a.get(i + 2), head_b.get(i + 2),
-                    head_a.get(i + 3), head_b.get(i + 3),
+                if let (
+                    Some(&a0),
+                    Some(&b0),
+                    Some(&a1),
+                    Some(&b1),
+                    Some(&a2),
+                    Some(&b2),
+                    Some(&a3),
+                    Some(&b3),
+                ) = (
+                    head_a.get(i),
+                    head_b.get(i),
+                    head_a.get(i + 1),
+                    head_b.get(i + 1),
+                    head_a.get(i + 2),
+                    head_b.get(i + 2),
+                    head_a.get(i + 3),
+                    head_b.get(i + 3),
                 ) {
                     acc0 = simd.mul_add_f32s(a0, b0, acc0);
                     acc1 = simd.mul_add_f32s(a1, b1, acc1);
@@ -109,11 +122,24 @@ impl<'a> WithSimd for EuclideanSqKernel<'a> {
             let mut i = 0;
             let len = head_a.len();
             while i + 4 <= len {
-                if let (Some(&a0), Some(&b0), Some(&a1), Some(&b1), Some(&a2), Some(&b2), Some(&a3), Some(&b3)) = (
-                    head_a.get(i), head_b.get(i),
-                    head_a.get(i + 1), head_b.get(i + 1),
-                    head_a.get(i + 2), head_b.get(i + 2),
-                    head_a.get(i + 3), head_b.get(i + 3),
+                if let (
+                    Some(&a0),
+                    Some(&b0),
+                    Some(&a1),
+                    Some(&b1),
+                    Some(&a2),
+                    Some(&b2),
+                    Some(&a3),
+                    Some(&b3),
+                ) = (
+                    head_a.get(i),
+                    head_b.get(i),
+                    head_a.get(i + 1),
+                    head_b.get(i + 1),
+                    head_a.get(i + 2),
+                    head_b.get(i + 2),
+                    head_a.get(i + 3),
+                    head_b.get(i + 3),
                 ) {
                     let d0 = simd.sub_f32s(a0, b0);
                     let d1 = simd.sub_f32s(a1, b1);
@@ -351,4 +377,3 @@ pub fn scalar_sum_of_squares(a: &[f32]) -> f32 {
     }
     sum
 }
-
