@@ -14,12 +14,27 @@
 
 #![forbid(unsafe_op_in_unsafe_fn)]
 
+pub mod at_rq;
 pub mod euclidean;
 pub mod hyperbolic;
 pub mod optimal_transport;
 pub mod product;
 pub mod simd;
 pub mod spherical;
+pub mod tangent;
+
+pub use at_rq::{
+    anisotropic_residual_loss, at_rq_build_query_lut, at_rq_decode_neighbor,
+    at_rq_encode_neighbor, at_rq_score_page_neighbors, CompactNeighborCode,
+    curvature_corrected_tangent_distance_squared,
+};
+
+pub use tangent::{
+    euclidean_exp_map, euclidean_log_map, euclidean_parallel_transport, euclidean_project_tangent,
+    lorentz_exp_map, lorentz_log_map, lorentz_parallel_transport, lorentz_project_tangent,
+    product_exp_map, product_log_map, product_parallel_transport, spherical_exp_map,
+    spherical_log_map, spherical_parallel_transport, spherical_project_tangent,
+};
 
 pub use optimal_transport::{
     debiased_sinkhorn_divergence, debiased_sinkhorn_divergence_with_workspace, sinkhorn_knopp,
