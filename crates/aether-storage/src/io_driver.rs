@@ -171,15 +171,27 @@ pub mod linux_uring {
 }
 
 /// Unified direct page I/O driver abstraction.
+#[allow(clippy::large_enum_variant)]
 pub enum DirectPageIoDriver {
     /// Linux kernel io_uring direct I/O driver.
     #[cfg(target_os = "linux")]
-    Uring(linux_uring::UringDirectDriver),
+    Uring(Box<linux_uring::UringDirectDriver>),
     /// Cross-platform synchronous direct file driver.
     File(FileDirectDriver),
 }
 
 impl DirectPageIoDriver {
+    /// Wrap a Linux io_uring driver.
+    #[cfg(target_os = "linux")]
+    pub fn from_uring(driver: linux_uring::UringDirectDriver) -> Self {
+        Self::Uring(Box::new(driver))
+    }
+
+    /// Wrap a synchronous direct file driver.
+    pub fn from_file(driver: FileDirectDriver) -> Self {
+        Self::File(driver)
+    }
+
     /// Creates a memory-only driver (useful for testing and environments without block storage).
     pub fn memory_only() -> Self {
         Self::File(FileDirectDriver::memory_only())
