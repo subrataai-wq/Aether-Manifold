@@ -7,9 +7,12 @@ name = "aether-consensus"
 version = "0.1.0"
 dependencies = [
  "aether-core",
- "crossbeam-utils",
- "portable-atomic",
+ "aether-manifold",
+ "aether-storage",
+ "bytemuck",
+ "crc32fast",
  "static_assertions",
+ "zerocopy",
 ]
 
 [[package]]
@@ -72,6 +75,7 @@ dependencies = [
 name = "aether-verify"
 version = "0.1.0"
 dependencies = [
+ "aether-consensus",
  "aether-core",
  "aether-manifold",
  "aether-query",
@@ -180,12 +184,6 @@ checksum = "01a7799fd6b852db0e61728dde9a204c423b44d689dbd432522543614b490e78"
 dependencies = [
  "cfg-if",
 ]
-
-[[package]]
-name = "crossbeam-utils"
-version = "0.8.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "crunchy"
@@ -623,12 +621,6 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
-
-[[package]]
-name = "portable-atomic"
-version = "1.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
 
 [[package]]
 name = "proc-macro2"

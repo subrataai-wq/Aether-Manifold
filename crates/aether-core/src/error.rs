@@ -78,4 +78,38 @@ pub enum AetherError {
         /// Number of heap allocations intercepted while hot-path guard was active.
         count: usize,
     },
+
+    /// Quorum acknowledgment threshold not reached.
+    #[error("Quorum not reached: required {required} acks, but only {received} received")]
+    QuorumNotReached {
+        /// Required number of node acknowledgments.
+        required: usize,
+        /// Actual number of node acknowledgments received.
+        received: usize,
+    },
+
+    /// Target cluster node is unreachable or partition disconnected.
+    #[error("Node unreachable: cluster node {node_id} failed to respond")]
+    NodeUnreachable {
+        /// Target node identifier.
+        node_id: u64,
+    },
+
+    /// Replication or MVCC HLC conflict detected.
+    #[error(
+        "Replication conflict: expected HLC {expected_hlc:#018x}, but actual is {actual_hlc:#018x}"
+    )]
+    ReplicationConflict {
+        /// Expected Hybrid Logical Clock timestamp.
+        expected_hlc: u64,
+        /// Actual or conflicting Hybrid Logical Clock timestamp.
+        actual_hlc: u64,
+    },
+
+    /// Network or RDMA hardware fabric fault.
+    #[error("Network fabric fault: error code {reason_code}")]
+    NetworkFault {
+        /// Specific reason code or synthetic fault tag.
+        reason_code: u32,
+    },
 }
