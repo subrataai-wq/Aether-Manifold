@@ -30,4 +30,8 @@ jobs:
         env:
           PROPTEST_CASES: ${{ github.event.inputs.proptest_cases || '5000' }}
         run: cargo test -p aether-verify --test optimal_transport_proptests --release -- --nocapture
+      - name: Run Sheaf Property Fuzzing (Release)
+        env:
+          PROPTEST_CASES: ${{ github.event.inputs.proptest_cases || '5000' }}
+        run: cargo test -p aether-verify --test sheaf_proptests --release -- --nocapture
 

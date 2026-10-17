@@ -62,6 +62,8 @@ jobs:
         run: cargo test -p aether-verify --test phase0_exit_gate_tests --release -- --nocapture
       - name: Run Phase 1 Exit Gates (Release)
         run: cargo test -p aether-verify --test phase1_exit_gate_tests --release -- --nocapture
+      - name: Run Phase 2 Exit Gates (Release)
+        run: cargo test -p aether-verify --test phase2_exit_gate_tests --release -- --nocapture
 
   tla-formal-proofs:
     name: TLA+ Formal Verification (TLC & Rust Oracle)

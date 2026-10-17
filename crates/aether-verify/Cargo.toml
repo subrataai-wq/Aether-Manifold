@@ -13,6 +13,7 @@ bytemuck = { workspace = true }
 
 [dev-dependencies]
 aether-storage = { workspace = true }
+aether-query = { workspace = true }
 proptest = { workspace = true }
 loom = { workspace = true }
 oorandom = { workspace = true }
