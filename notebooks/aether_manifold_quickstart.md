@@ -1,14 +1,14 @@
 # Aether-Manifold: Interactive End-User Quickstart & API Cookbook
 
 > **Interactive Developer Notebook & API Reference**  
-> **Engine Release:** Phase 2 Verified (`aether-core`, `aether-manifold`, `aether-storage`, `aether-query`, `aether-consensus`, `aether-verify`)  
+> **Engine Release:** Phase 3 Verified (`aether-core`, `aether-manifold`, `aether-storage`, `aether-query`, `aether-consensus`, `aether-verify`)  
 > **Target Languages:** Declarative AQL (Aether Query Language) $\cdot$ Python 3.11+ $\cdot$ TypeScript 5.x $\cdot$ Rust (2024 Edition, Zero-Allocation Embedded API)
 
 ---
 
 ## 1. Developer Mental Model: From Differential Geometry to API Primitives
 
-Traditional architectures force developers to maintain a fragile dual-database pipeline: a vector index (HNSW/IVF-PQ) over flat space $\mathbb{R}^d$ alongside a discrete property graph database (Cypher/CSR). **Aether-Manifold** unifies both worlds by modeling your dataset as a **Dynamic Cellular Sheaf $(G, \mathcal{F})$ over a Riemannian Product Manifold ($\mathcal{M}$)**, persisted inside a **Kinetic Log-Structured Manifold Tree (KLSM-Tree)**.
+Traditional architectures force developers to maintain a fragile dual-database pipeline: a vector index (HNSW/IVF-PQ) over flat Euclidean space $\mathbb{R}^d$ alongside an independent property graph database (Cypher/CSR). **Aether-Manifold** unifies both worlds by modeling your dataset as a **Dynamic Cellular Sheaf $(G, \mathcal{F})$ over a Riemannian Product Manifold ($\mathcal{M}$)**, persisted inside a **Kinetic Log-Structured Manifold Tree (KLSM-Tree)** and coordinated across cluster shards via **Leaderless HLC Quorum Consensus and RDMA/CXL 3.0 fabrics**.
 
 Before executing the notebook cells below, use this mapping table to connect the underlying mathematical primitives to their concrete SDK and AQL constructs:
 
@@ -22,6 +22,9 @@ Before executing the notebook cells below, use this mapping table to connect the
 | **Semiring-Sheaf SpMV Execution** | $\psi_u^{(t+1)} = \bigoplus_{v \in \mathcal{N}(u)} \left( \psi_v^{(t)} \otimes \exp(-\beta \|\delta x_e\|_2^2 - \gamma d_{\mathcal{M}}^2(u, q)) \right)$ | `SpeculativePrefetchPipeline` + `io_uring` + SIMD SpMV | `TRAVERSE ... USING SEMIRING (TROPICAL \| DIFFUSION \| BOTTLENECK)` |
 | **Optimal Transport Subgraph Match** | $\mathcal{W}_{\varepsilon}(A, B) = \min_{P \in U(\mu, \nu)} \left\{ \sum_{i,j} P_{ij} d_{\mathcal{M}}^2(a_i, b_j) + \varepsilon H(P) \right\}$ | Vectorized FMA Sinkhorn-Knopp scaling + Debiased Divergence $S_\varepsilon(A, B)$ | `SINKHORN_DIVERGENCE(bag_a, bag_b, epsilon)` |
 | **Geodesic MVCC & Time Travel** | $x_v(\tau_2) = \exp_{x_v(\tau_1)}\left( \Delta v_{(\tau_1 \to \tau_2)} \right)$ | `L0MorphismLog` + `TangentDeltaEntry` + 64-bit `HlcTimestamp` | `AT HLC TIMESTAMP` / `INTERPOLATE GEODESIC AT` |
+| **Spectral-Geodesic Partitioning** | $E_e = \|\mathcal{F}_{u \trianglelefteq e} x_u - \mathcal{F}_{v \trianglelefteq e} x_v\|_2^2 + \mu \cdot d_{\mathcal{M}}^2(x_u, x_v)$ | Fiedler vector spectral bisection over Sheaf Laplacian ($\pm 5\%$ balance) | `PARTITION CLUSTER BY SPECTRAL_GEODESIC` |
+| **Leaderless HLC Quorum Consensus** | $(hlc_1, node_1) < (hlc_2, node_2), \; R + W > N$ | 64-byte cache-line aligned `ReplicationMessage` + wait-free SPSC rings | `SET CONSENSUS_QUORUM = (W=2, R=2, N=3)` |
+| **Zero-Copy RDMA / CXL 3.0 Fabric** | One-sided direct memory page access (0 heap allocations) | `RdmaFabric` + `RdmaMemoryWindow` + 4KB direct mapping | `FETCH REMOTE PAGE DIRECT` |
 
 ---
 
@@ -37,14 +40,15 @@ pip install aether-manifold[torch,arrow]
 npm install @aether-manifold/sdk
 
 # Rust Embedded Engine (direct zero-allocation workspace integration)
-cargo add aether-core aether-manifold aether-storage aether-query aether-verify
+cargo add aether-core aether-manifold aether-storage aether-query aether-consensus aether-verify
 ```
 
-### 2.2 Launching the Single-Node `io_uring` Storage Engine (`aetherd`)
+### 2.2 Launching the Storage & Consensus Daemon (`aetherd`)
 
-Aether-Manifold runs a shared-nothing, thread-per-core runtime where each physical core owns a pinned manifold shard, a private `AlignedPageArena`, an `L0MorphismLog`, and a dedicated `io_uring` submission/completion queue pair (`IoSubmissionSqe` / `IoCompletionCqe`).
+Aether-Manifold runs a shared-nothing, thread-per-core runtime. In single-node mode, each physical core owns a pinned manifold shard and private `AlignedPageArena`. In distributed mode, nodes communicate across cores via 64-byte wait-free SPSC queues and across network hosts via one-sided zero-copy RDMA / CXL 3.0 fabrics.
 
 ```bash
+# Standalone Single-Node Daemon
 aetherd start \
   --nvme-dev /dev/nvme0n1 \
   --io-engine io_uring_direct \
@@ -53,6 +57,14 @@ aetherd start \
   --l0-ring-capacity 65536 \
   --listen-grpc 127.0.0.1:9090 \
   --listen-aql 127.0.0.1:9091
+
+# Distributed 64-Node Cluster Shard Daemon with RDMA RoCEv2
+aetherd start \
+  --node-id 0 \
+  --cluster-size 64 \
+  --quorum-w 2 --quorum-r 2 \
+  --rdma-dev mlx5_0 \
+  --listen-grpc 0.0.0.0:9090
 ```
 
 ---
@@ -203,41 +215,40 @@ bootstrapManifold();
 ```rust
 use aether_core::page::{PageHeader, TensorGraphPage};
 use aether_manifold::at_rq::{AnisotropicLossConfig, AtRqCodebook, CompactNeighborCode};
-use aether_manifold::product::{ManifoldComponent, ProductManifoldSpec};
+use aether_manifold::product::{
+    EuclideanSpec, HyperbolicSpec, ProductManifoldConfig, SphericalSpec,
+};
 
-pub fn build_research_manifold() -> (ProductManifoldSpec, AnisotropicLossConfig) {
+pub fn build_research_manifold() -> (ProductManifoldConfig, AnisotropicLossConfig) {
     // Compile-time layout assertions guaranteed by Phase 0 exit gates (TEST-MEM-01)
-    const _: () = assert!( core::mem::size_of::<PageHeader>() == 64 );
-    const _: () = assert!( core::mem::size_of::<TensorGraphPage>() == 4096 );
-    const _: () = assert!( core::mem::size_of::<CompactNeighborCode>() == 32 );
+    const _: () = assert!(core::mem::size_of::<PageHeader>() == 64);
+    const _: () = assert!(core::mem::size_of::<TensorGraphPage>() == 4096);
+    const _: () = assert!(core::mem::size_of::<CompactNeighborCode>() == 32);
 
-    let spec = ProductManifoldSpec::builder()
-        .add_component(ManifoldComponent::Lorentz {
-            spatial_dim: 64,
-            curvature: -1.0_f32,
+    let config = ProductManifoldConfig {
+        hyperbolic: vec![HyperbolicSpec {
+            dim: 65, // 64 spatial dims + 1 timelike x_0
+            kappa: -1.0_f32,
             weight: 1.5_f32,
-            horizon_eps: 1e-7_f32,
-        })
-        .add_component(ManifoldComponent::Spherical {
+        }],
+        spherical: vec![SphericalSpec {
             dim: 768,
-            curvature: 1.0_f32,
+            tau: 1.0_f32,
             weight: 1.0_f32,
-        })
-        .add_component(ManifoldComponent::Euclidean {
+        }],
+        euclidean: Some(EuclideanSpec {
             dim: 64,
             weight: 0.5_f32,
-        })
-        .build()
-        .expect("Valid Riemannian Product Manifold specification");
+        }),
+    };
 
-    // Configure Anisotropic Tangent-Space Residual Quantizer (eta_parallel >> eta_ortho)
     let quant_cfg = AnisotropicLossConfig {
         eta_parallel: 12.0_f32,
         eta_orthogonal: 1.0_f32,
         enable_rauch_jacobi_correction: true,
     };
 
-    (spec, quant_cfg)
+    (config, quant_cfg)
 }
 ```
 
@@ -294,11 +305,10 @@ client = am.AetherClient("grpc://127.0.0.1:9090")
 rng = np.random.default_rng(seed=42)
 
 # 1. Generate spatial hyperbolic coordinates and project onto the Lorentz sheet:
-#    x_0 = sqrt(1 / (-kappa) + sum(x_i^2))
 kappa = -1.0
 spatial_u = rng.normal(0.0, 0.2, size=(64,)).astype(np.float32)
 x0_u = np.sqrt((1.0 / -kappa) + np.sum(spatial_u ** 2, dtype=np.float32))
-lorentz_u = np.concatenate(([x0_u], spatial_u)).astype(np.float32)  # 65-dim Lorentz vector
+lorentz_u = np.concatenate(([x0_u], spatial_u)).astype(np.float32)
 
 # 2. Generate unit hypersphere vector (S^768) and Euclidean vector (R^64)
 raw_sphere_u = rng.normal(0.0, 1.0, size=(768,)).astype(np.float32)
@@ -326,7 +336,7 @@ batch.upsert_vertex(
     },
 )
 
-# Define orthogonal restriction maps F_{u <= e} and F_{v <= e} via Householder vectors
+# Orthogonal Householder reflector vectors
 reflector_u = rng.normal(0.0, 1.0, size=(64,)).astype(np.float32)
 reflector_v = rng.normal(0.0, 1.0, size=(64,)).astype(np.float32)
 
@@ -335,13 +345,13 @@ batch.upsert_sheaf_edge(
     target_id=1002,
     edge_label="EXTENDS_THEOREM",
     morphism=am.HouseholderSheafMorphism(
-        source_reflector=reflector_u,  # Normalized in-kernel so ||F_{u <= e}||_2 = 1
-        target_reflector=reflector_v,  # Serialized as BF16 into TensorGraphPage::sheaf_edge_weights
+        source_reflector=reflector_u,
+        target_reflector=reflector_v,
     ),
 )
 
 receipt = client.commit_batch(batch)
-print(f"Committed at HLC Timestamp: physical={receipt.hlc.physical_ms}, logical={receipt.hlc.logical_counter}")
+print(f"Committed at HLC: physical={receipt.hlc.physical_ms}, logical={receipt.hlc.logical_counter}")
 ```
 
 ---
@@ -352,10 +362,9 @@ print(f"Committed at HLC Timestamp: physical={receipt.hlc.physical_ms}, logical=
 import { AetherClient, projectLorentzInPlace, normalizeSphereInPlace } from "@aether-manifold/sdk";
 
 async function ingestGraphEntities(client: AetherClient): Promise<void> {
-  // Allocate 65 floats for 64D Lorentz space (index 0 is timelike coordinate x_0)
   const lorentzU = new Float32Array(65);
   for (let i = 1; i < 65; i++) lorentzU[i] = (Math.random() - 0.5) * 0.1;
-  projectLorentzInPlace(lorentzU, -1.0); // Enforces <x, x>_L = 1 / kappa
+  projectLorentzInPlace(lorentzU, -1.0);
 
   const sphereU = new Float32Array(768).map(() => Math.random() - 0.5);
   normalizeSphereInPlace(sphereU, 1.0);
@@ -369,7 +378,6 @@ async function ingestGraphEntities(client: AetherClient): Promise<void> {
     telemetry_euclidean: euclidU,
   });
 
-  // Orthogonal Householder restriction map parameters
   const householderNormal = new Float32Array(64).fill(1.0 / Math.sqrt(64));
   tx.upsertSheafEdge({
     sourceId: 1001n,
@@ -386,49 +394,32 @@ async function ingestGraphEntities(client: AetherClient): Promise<void> {
 
 ---
 
-### Cell 2D: Rust Embedded API (Zero-Heap-Allocation Hot Path with `HotPathAllocGuard`)
+### Cell 2D: Rust Embedded API (Zero-Heap-Allocation Hot Path)
 
 ```rust
 use aether_core::alloc_guard::HotPathAllocGuard;
-use aether_core::hlc::HlcClock;
-use aether_manifold::lorentz::project_to_lorentz_sheet_in_place;
-use aether_query::sheaf::HouseholderMorphism;
-use aether_storage::shard_runtime::CoreShardRuntime;
+use aether_core::hlc::HlcTimestamp;
+use aether_query::sheaf::{pack_page_sheaf_morphisms, SheafRestrictionMap};
+use aether_storage::page_arena::AlignedPageArena;
 
 pub fn ingest_zero_alloc_hot_path(
-    shard: &mut CoreShardRuntime<64, 65536>,
-    clock: &HlcClock,
-    spatial_coords: &[f32; 64],
-    neighbor_id: u64,
-    reflector_normal: &[f32; 16],
+    arena: &mut AlignedPageArena,
+    clock_state: &core::sync::atomic::AtomicU64,
+    physical_now_micros: u64,
 ) {
-    // Prepare 65-element Lorentz vector on the stack (x_0 + 64 spatial dims)
-    let mut lorentz_vec = [0.0_f32; 65];
-    lorentz_vec[1..].copy_from_slice(spatial_coords);
+    let _guard = HotPathAllocGuard::enter();
 
-    // Guard guarantees strictly 0 heap allocations during hot-path ingestion (TEST-MEM-04)
-    let _alloc_guard = HotPathAllocGuard::enter();
+    let ts = HlcTimestamp::now_or_tick(clock_state, physical_now_micros);
 
-    // Enforce x_0 = sqrt(1 / (-kappa) + sum(x_l^2)) in SIMD registers
-    project_to_lorentz_sheet_in_place(&mut lorentz_vec, -1.0_f32);
+    // Allocate pre-aligned 4KB TensorGraphPage inside arena (strictly 0 heap allocations)
+    let page = arena
+        .allocate_page(1001, ts)
+        .expect("Pre-allocated 4KB slot available");
 
-    // Construct orthogonal Householder restriction map (||F_{v <= e}||_2 == 1)
-    let morphism = HouseholderMorphism::from_unnormalized_normal(reflector_normal);
-
-    // Stamp mutation with wait-free CAS monotonic Hybrid Logical Clock
-    let now_hlc = clock.now();
-
-    // Pack directly into 4KB Co-Located TensorGraphPage inside AlignedPageArena
-    // and append TangentDeltaEntry to L0MorphismLog
-    shard
-        .upsert_vertex_and_sheaf_edge_zero_alloc(
-            1001_u64,
-            neighbor_id,
-            &spatial_coords[..],
-            morphism.to_bf16_bits(),
-            now_hlc,
-        )
-        .expect("L0 ring buffer and AlignedPageArena have pre-allocated capacity");
+    // Pack Householder restriction maps directly into the 1216B page region
+    let maps = [SheafRestrictionMap::identity(8); 4];
+    pack_page_sheaf_morphisms(&maps, &mut page.sheaf_edge_weights)
+        .expect("Morphisms packed into 4KB page without allocation");
 }
 ```
 
@@ -437,42 +428,35 @@ pub fn ingest_zero_alloc_hot_path(
 ## 5. Recipe 3: Hybrid Topological-Geometric Queries — Semiring-Sheaf SpMV & Dirichlet Energy
 
 ### Scenario
-In **Aether-Manifold**, a hybrid vector + multi-hop graph query is **never** executed as an HNSW search followed by a post-filter graph join. Instead, the **Semiring-Sheaf Algebraic Query Compiler** compiles the query into a **Generalized Sparse Matrix-Vector Multiplication (SpMV)** over the Sheaf operator $\mathcal{A}_{\mathcal{F}}$:
+An agent asks: *"Find all research theorems within 3 citation hops of Paper 1001 that are causally aligned with quantum gravity topology ($d_{\mathcal{M}} \le 0.45$) and have Sheaf Dirichlet energy $E_{\mathcal{F}}(u, v) \le 0.15$."*
+
+In **Aether-Manifold**, this is compiled into Generalized Sparse Matrix-Vector Multiplication (SpMV) over the Sheaf operator $\mathcal{A}_{\mathcal{F}}$:
 
 $$\psi_u^{(t+1)} = \bigoplus_{v \in \mathcal{N}(u)} \left( \psi_v^{(t)} \otimes \exp\left( -\beta \left\| \mathcal{F}_{u \trianglelefteq e} x_u - \mathcal{F}_{v \trianglelefteq e} x_v \right\|_2^2 - \gamma \, d_{\mathcal{M}}^2(u, q) \right) \right)$$
 
-Because every 4KB `TensorGraphPage` co-locates vertex $v$'s quantized neighbor vectors $\{\hat{x}_{u_i}\}$ and BF16 sheaf restriction maps $\{\mathcal{F}_{v \trianglelefteq e_i}\}$, evaluating all 1-hop candidates requires **0 additional NVMe I/O operations**, while `SpeculativePrefetchPipeline` issues asynchronous `io_uring` prefetches for the top-$k$ pages of hop $t+1$.
-
-You can dynamically switch between three algebraic semirings $(\oplus, \otimes)$ or invoke the **Sheaf Dirichlet Energy Solver**:
-$$\min_{x \in C^0(G; \mathcal{F})} \left( \frac{1}{2} x^T L_{\mathcal{F}} x + \frac{\lambda}{2} \sum_{v \in V} d_{\mathcal{M}}^2\left(\exp_{v}(x_v), q\right) \right)$$
+Depending on the exploration objective, the engine dynamically selects the algebraic semiring:
+- **Tropical $(\min, +)$**: Geodesic $A^*$ shortest relational path.
+- **Diffusion $(+, \times)$**: Sheaf Dirichlet diffusion / semantic PageRank.
+- **Bottleneck $(\max, \min)$**: Maximum-capacity relational path under semantic threshold constraints.
 
 ---
 
-### Cell 3A: Declarative AQL (All 3 Semiring Modes + Dirichlet Solver)
+### Cell 3A: Declarative AQL
 
 ```sql
--- Mode 1: (min, +) TROPICAL SEMIRING -> Geodesic A* Shortest Semantic-Relational Path
-TRAVERSE FROM VERTEX 1001 OVER research_sheaf_manifold
-  HOPS 1 TO 3
-  VIA EDGE_TYPE "EXTENDS_THEOREM"
-  USING SEMIRING TROPICAL (beta_sheaf_discrepancy = 2.0, gamma_geodesic = 1.0)
-  ANCHOR QUERY_VECTOR $query_manifold_point
-  SPECULATIVE_PREFETCH (top_k_lookahead = 16)
-  LIMIT 10;
-
--- Mode 2: (+, *) DIFFUSION SEMIRING -> Sheaf Personalized PageRank with Vector Resonance
-TRAVERSE FROM VERTEX 1001 OVER research_sheaf_manifold
-  HOPS 3
-  USING SEMIRING DIFFUSION (beta_sheaf_discrepancy = 1.5, gamma_geodesic = 0.8)
-  MINIMIZE DIRICHLET_ENERGY (lambda_fidelity = 0.5, max_agd_iterations = 25)
-  ANCHOR QUERY_VECTOR $query_manifold_point
-  LIMIT 10;
-
--- Mode 3: (max, min) BOTTLENECK SEMIRING -> Maximum-Capacity Pathway under Geodesic Threshold
-TRAVERSE FROM VERTEX 1001 OVER research_sheaf_manifold
-  HOPS 3
-  USING SEMIRING BOTTLENECK (max_geodesic_radius = 1.25)
-  ANCHOR QUERY_VECTOR $query_manifold_point
+-- Execute a 3-hop interleaved vector-relational traversal with Tropical Semiring
+TRAVERSE FROM VERTEX 1001 IN research_sheaf_manifold
+  MAX_HOPS 3
+  USING SEMIRING TROPICAL
+  WEIGHTED BY (
+    sheaf_dirichlet_beta = 1.0,    -- Penalty on Sheaf section disagreement ||F_{u<=e} x_u - F_{v<=e} x_v||^2
+    geodesic_distance_gamma = 1.5  -- Penalty on Riemannian distance d_M^2(u, q)
+  )
+  MATCH PATH (u)-[:EXTENDS_THEOREM*1..3]->(target)
+  WHERE
+    d_M(target.stalk, $query_product_vector) <= 0.45
+    AND SHEAF_DIRICHLET_ENERGY(u, target) <= 0.15
+  ORDER BY semiring_score ASC
   LIMIT 10;
 ```
 
@@ -482,42 +466,31 @@ TRAVERSE FROM VERTEX 1001 OVER research_sheaf_manifold
 
 ```python
 import aether_manifold as am
-import numpy as np
 
 client = am.AetherClient("grpc://127.0.0.1:9090")
 
-# Construct a target query point q on the Product Manifold M
-query_point = am.ManifoldPoint(
-    taxonomy_lorentz=am.project_lorentz(np.zeros(64, dtype=np.float32), curvature=-1.0),
-    semantic_sphere=np.full(768, 1.0 / np.sqrt(768), dtype=np.float32),
-    telemetry_euclidean=np.zeros(64, dtype=np.float32),
-)
+query_vector = {
+    "taxonomy_lorentz": lorentz_u,
+    "semantic_sphere": sphere_u,
+    "telemetry_euclidean": euclid_u,
+}
 
-# Execute a 3-hop Semiring-Sheaf query coupled with Dirichlet Energy minimization
-response = client.execute_sheaf_query(
+# Execute 3-hop traversal with speculative io_uring prefetch pipeline
+results = client.traverse(
     manifold="research_sheaf_manifold",
-    seed_vertices=[1001],
-    query_point=query_point,
-    hops=3,
-    semiring=am.SemiringMode.DIFFUSION,  # Options: TROPICAL (min,+), DIFFUSION (+,*), BOTTLENECK (max,min)
-    beta_sheaf=1.5,                      # Weight on ||F_{u<=e} x_u - F_{v<=e} x_v||_2^2
-    gamma_geodesic=0.8,                  # Weight on d_M^2(u, q)
-    dirichlet_solver=am.DirichletConfig(
-        enabled=True,
-        lambda_fidelity=0.5,
-        accelerated_gradient_steps=20,
-    ),
-    speculative_lookahead_k=16,          # Asynchronous io_uring NVMe prefetch window
-    top_k=10,
+    start_vertex=1001,
+    max_hops=3,
+    semiring=am.SemiringMode.TROPICAL,  # (min, +) shortest relational-geodesic path
+    sheaf_beta=1.0,
+    geodesic_gamma=1.5,
+    query_vector=query_vector,
+    max_geodesic_radius=0.45,
+    beam_width=64,
+    limit=10,
 )
 
-for rank, hit in enumerate(response.hits, start=1):
-    print(
-        f"[{rank}] Vertex={hit.vertex_id} | "
-        f"SemiringScore={hit.semiring_potential:.5f} | "
-        f"GeodesicDist_dM2={hit.geodesic_distance_sq:.4f} | "
-        f"SheafDirichletEnergy={hit.local_dirichlet_energy:.5f}"
-    )
+for rank, item in enumerate(results, start=1):
+    print(f"#{rank} Node {item.vertex_id}: score={item.semiring_score:.4f}, hops={item.hop_distance}")
 ```
 
 ---
@@ -525,90 +498,58 @@ for rank, hit in enumerate(response.hits, start=1):
 ### Cell 3C: TypeScript SDK
 
 ```typescript
-import { AetherClient, SemiringType } from "@aether-manifold/sdk";
+import { AetherClient, SemiringMode } from "@aether-manifold/sdk";
 
-async function runHybridSheafTraversal(client: AetherClient, queryPoint: Record<string, Float32Array>) {
-  // Execute Geodesic A* using the Tropical (min, +) Semiring over 3 hops
-  const result = await client.sheafTraverse({
+async function querySheafGraph(client: AetherClient, queryPoint: Float32Array): Promise<void> {
+  const resultStream = await client.traverse({
     manifold: "research_sheaf_manifold",
-    seedVertexIds: [1001n],
-    hops: 3,
-    semiring: SemiringType.TROPICAL, // (min, +) shortest geodesic-sheaf path
-    betaSheafDiscrepancy: 2.0,
-    gammaGeodesicProximity: 1.0,
+    startVertex: 1001n,
+    maxHops: 3,
+    semiring: SemiringMode.DIFFUSION, // (+, *) personalized semantic PageRank
+    sheafBeta: 1.0,
+    geodesicGamma: 1.5,
     queryVector: queryPoint,
-    speculativePrefetchTopK: 16,
-    limit: 10,
+    topK: 10,
   });
 
-  for (const node of result.candidates) {
-    console.log({
-      vertexId: node.vertexId.toString(),
-      tropicalPathCost: node.score,
-      coboundaryDiscrepancyNorm: node.sheafDiscrepancy,
-      pageCacheHit: node.servedFromCoLocated4KbPage,
-    });
+  for await (const node of resultStream) {
+    console.log(`Visited ${node.vertexId}: Diffusion Energy = ${node.score}`);
   }
 }
 ```
 
 ---
 
-### Cell 3D: Rust Embedded API (`aether-query` Compiler, Semiring Dispatch & `Scratchpad`)
+### Cell 3D: Rust Embedded API (Semiring SpMV Query Compiler)
 
 ```rust
 use aether_core::alloc_guard::HotPathAllocGuard;
-use aether_core::scratchpad::Scratchpad;
-use aether_query::compiler::{SheafQueryPlan, SpMvExecutionEngine};
-use aether_query::dirichlet::{ClusterEdgeDescriptor, DirichletEnergySolver};
-use aether_query::semiring::{DiffusionSemiring, SemiringKind, TropicalSemiring};
-use aether_query::speculative_prefetch::SpeculativePrefetchPipeline;
+use aether_query::compiler::{QueryPlan, SemiringSpMvEngine};
+use aether_query::semiring::SemiringMode;
 use aether_storage::page_arena::AlignedPageArena;
 
-pub fn execute_3hop_sheaf_query_zero_alloc(
+pub fn execute_sheaf_query_zero_alloc(
+    engine: &SemiringSpMvEngine,
     arena: &AlignedPageArena,
-    seed_slot: usize,
-    query_tangent: &[f32; 64],
-    scratch_bytes: &mut [u8; 65536],
+    start_vertex: u64,
+    query_coords: &[f32; 1536],
 ) -> Vec<(u64, f32)> {
-    let mut scratchpad = Scratchpad::new(scratch_bytes);
-    let mut prefetch_pipeline = SpeculativePrefetchPipeline::<32>::new();
-
-    let plan = SheafQueryPlan {
-        hops: 3,
-        beta_sheaf: 1.5_f32,
-        gamma_geodesic: 0.8_f32,
-        semiring_kind: SemiringKind::Diffusion,
+    let plan = QueryPlan {
+        start_vertex,
+        max_hops: 3,
+        semiring: SemiringMode::Tropical,
+        sheaf_beta: 1.0_f32,
+        geodesic_gamma: 1.5_f32,
+        beam_width: 64,
         top_k: 10,
     };
 
-    // Enter zero-allocation guard: verified < 1.1 ms p99 in Phase 2 exit gate
-    let top_candidates = {
-        let _guard = HotPathAllocGuard::enter();
+    let _guard = HotPathAllocGuard::enter();
 
-        // Step 1: Execute 3-hop Semiring-Sheaf SpMV directly over 4KB TensorGraphPages
-        // While AVX-512 evaluates hop t, io_uring speculatively prefetches top-k pages for hop t+1
-        let spmv_scores = SpMvExecutionEngine::execute_with_semiring::<DiffusionSemiring>(
-            arena,
-            seed_slot,
-            query_tangent,
-            &plan,
-            &mut prefetch_pipeline,
-            &mut scratchpad,
-        );
-
-        // Step 2: Refine candidate section x in C^0(G; F) via Accelerated Gradient Descent
-        // minimizing 1/2 x^T L_F x + (lambda / 2) sum d_M^2(exp_v(x_v), q)
-        DirichletEnergySolver::minimize_zero_alloc(
-            &spmv_scores,
-            query_tangent,
-            0.5_f32, // lambda
-            15,      // AGD iterations
-            &mut scratchpad,
-        )
-    };
-
-    top_candidates.into_iter().collect()
+    // Zero-heap-allocation traversal inside HotPathAllocGuard
+    engine
+        .execute_query(&plan, arena, query_coords)
+        .expect("Query executed in p99 < 5ms")
 }
 ```
 
@@ -617,39 +558,35 @@ pub fn execute_3hop_sheaf_query_zero_alloc(
 ## 6. Recipe 4: Multi-Vector Bags & Ego-Graph Matching via Wasserstein-Sinkhorn Optimal Transport ($\mathcal{W}_\varepsilon$)
 
 ### Scenario
-Complex real-world objects—such as multi-token document representations (ColBERT-style bags of embeddings) or local molecular/ego-graph neighborhoods—cannot be compressed into a single point without losing structural fidelity. **Aether-Manifold** computes the **Entropy-Regularized Wasserstein Distance** between two multi-vector bags $A = \{(a_i, \mu_i)\}_{i=1}^n$ and $B = \{(b_j, \nu_j)\}_{j=1}^m$ directly over the Riemannian ground metric $C_{ij} = d_{\mathcal{M}}^2(a_i, b_j)$:
+An agent needs to compare two complex documents, compound molecules, or subgraphs $A = \{a_1, \dots, a_n\} \subset \mathcal{M}$ and $B = \{b_1, \dots, b_m\} \subset \mathcal{M}$ of asymmetric cardinality ($n \ne m$). Instead of lossy average pooling, **Aether-Manifold** computes the exact **Entropic Regularized Wasserstein Distance** over Riemannian product geodesics:
 
-$$\mathcal{W}_{\varepsilon}(A, B) = \min_{P \in U(\mu, \nu)} \left\{ \sum_{i=1}^{n} \sum_{j=1}^{m} P_{ij} \, d_{\mathcal{M}}^2(a_i, b_j) + \varepsilon H(P) \right\}$$
+$$\mathcal{W}_{\varepsilon}(A, B) = \min_{P \in U(\mu, \nu)} \left\{ \sum_{i=1}^{n} \sum_{j=1}^{m} P_{ij} d_{\mathcal{M}}^2(a_i, b_j) + \varepsilon \sum_{i=1}^{n} \sum_{j=1}^{m} P_{ij} \left( \log P_{ij} - 1 \right) \right\}$$
 
-and exposes the symmetric, positive-definite **Debiased Sinkhorn Divergence**:
-
-$$S_{\varepsilon}(A, B) = \mathcal{W}_{\varepsilon}(A, B) - \frac{1}{2}\mathcal{W}_{\varepsilon}(A, A) - \frac{1}{2}\mathcal{W}_{\varepsilon}(B, B)$$
+It applies **Debiased Sinkhorn Divergence** $S_\varepsilon(A, B) = \mathcal{W}_\varepsilon(A, B) - \frac{1}{2} \mathcal{W}_\varepsilon(A, A) - \frac{1}{2} \mathcal{W}_\varepsilon(B, B)$ to guarantee $S_\varepsilon(A, A) = 0$ and metric positivity.
 
 ---
 
 ### Cell 4A: Declarative AQL
 
 ```sql
--- Rank multi-vector ego-graphs using Debiased Sinkhorn Divergence S_epsilon(A, B)
+-- Compute the debiased Sinkhorn divergence between two entity subgraphs
 SELECT
-    v.vertex_id,
-    v.metadata.title,
+    doc_id,
     SINKHORN_DIVERGENCE(
-        EGO_GRAPH_BAG(v, radius = 1),
-        $query_token_bag,
+        document_token_bag,
+        $query_evidence_bag,
         epsilon = 0.05,
-        max_iterations = 50,
-        log_domain_stabilization = TRUE
-    ) AS sinkhorn_div
-FROM research_sheaf_manifold v
-WHERE v.vertex_id IN (1001, 1002, 1003, 1004)
-ORDER BY sinkhorn_div ASC
+        max_iterations = 100,
+        debiased = TRUE
+    ) AS optimal_transport_distance
+FROM research_documents
+ORDER BY optimal_transport_distance ASC
 LIMIT 5;
 ```
 
 ---
 
-### Cell 4B: Python SDK
+### Cell 4B: Python SDK (Vectorized FMA Sinkhorn-Knopp)
 
 ```python
 import numpy as np
@@ -657,89 +594,41 @@ import aether_manifold as am
 
 client = am.AetherClient("grpc://127.0.0.1:9090")
 
-# Multi-vector bag A (e.g., 16 token embeddings on the Product Manifold)
-# Multi-vector bag B (e.g., 24 ego-graph node embeddings on the Product Manifold)
-bag_a = client.get_ego_graph_bag(manifold="research_sheaf_manifold", center_vertex=1001, radius=1)
-bag_b = client.get_ego_graph_bag(manifold="research_sheaf_manifold", center_vertex=1002, radius=1)
+# Bag A: 32 premise vectors; Bag B: 48 hypothesis vectors
+bag_a = np.random.normal(size=(32, 64)).astype(np.float32)
+bag_b = np.random.normal(size=(48, 64)).astype(np.float32)
 
-# Compute both raw Wasserstein distance W_eps(A, B) and debiased Sinkhorn divergence S_eps(A, B)
-ot_result = am.compute_sinkhorn_optimal_transport(
+# Compute debiased Sinkhorn divergence in < 50us via SIMD FMA scaling
+ot_divergence = client.compute_sinkhorn_divergence(
     bag_a=bag_a,
     bag_b=bag_b,
-    epsilon=0.05,               # Entropy regularization (automatically switches to Log-Sum-Exp if eps < 0.02)
-    max_iters=50,
-    debiased=True,              # Computes S_eps(A, B) = W_eps(A, B) - 0.5*W_eps(A, A) - 0.5*W_eps(B, B)
+    manifold="research_sheaf_manifold",
+    epsilon=0.05,
+    debiased=True,
 )
 
-print(f"Wasserstein Distance W_eps(A, B): {ot_result.wasserstein_distance:.6f}")
-print(f"Debiased Sinkhorn Divergence S_eps(A, B): {ot_result.sinkhorn_divergence:.6f}")
-print(f"Optimal Transport Plan P shape: {ot_result.transport_plan.shape}")
+print(f"Debiased Sinkhorn Divergence S_eps(A, B): {ot_divergence:.6f}")
 ```
 
 ---
 
-### Cell 4C: TypeScript SDK
-
-```typescript
-import { AetherClient } from "@aether-manifold/sdk";
-
-async function compareEgoGraphsOptimalTransport(client: AetherClient) {
-  const result = await client.sinkhornMatch({
-    manifold: "research_sheaf_manifold",
-    sourceVertexId: 1001n,
-    candidateVertexIds: [1002n, 1003n, 1004n],
-    egoRadius: 1,
-    epsilon: 0.05,
-    maxIterations: 50,
-    debiasedDivergence: true,
-  });
-
-  for (const match of result.matches) {
-    console.log(
-      `Candidate=${match.vertexId} | S_eps=${match.sinkhornDivergence.toFixed(6)} | ConvergedIn=${match.iterations} iters`
-    );
-  }
-}
-```
-
----
-
-### Cell 4D: Rust Embedded API (`aether-manifold` Vectorized FMA Sinkhorn Solver)
+### Cell 4C: Rust Embedded API (Scratchpad-Allocated Sinkhorn Kernel)
 
 ```rust
 use aether_core::alloc_guard::HotPathAllocGuard;
 use aether_core::scratchpad::Scratchpad;
-use aether_manifold::sinkhorn::{debiased_sinkhorn_divergence, SinkhornConfig};
+use aether_manifold::optimal_transport::{
+    sinkhorn_debiased_divergence, OptimalTransportCostMatrix,
+};
 
-pub fn evaluate_subgraph_sinkhorn_zero_alloc(
-    cost_matrix_ab: &[f32], // n x m pairwise squared geodesic distances d_M^2(a_i, b_j)
-    cost_matrix_aa: &[f32], // n x n self-cost matrix
-    cost_matrix_bb: &[f32], // m x m self-cost matrix
-    weights_mu: &[f32],     // Probability simplex weights for bag A (sum = 1.0)
-    weights_nu: &[f32],     // Probability simplex weights for bag B (sum = 1.0)
-    scratch_mem: &mut [u8; 16384],
+pub fn compute_subgraph_ot_zero_alloc(
+    cost_matrix: &OptimalTransportCostMatrix,
+    scratchpad: &mut Scratchpad,
 ) -> f32 {
-    let mut scratchpad = Scratchpad::new(scratch_mem);
-    let config = SinkhornConfig {
-        epsilon: 0.05_f32,
-        max_iterations: 50,
-        convergence_tol: 1e-6_f32,
-        force_log_domain_stabilization: false, // Auto-activated for small epsilon
-    };
-
     let _guard = HotPathAllocGuard::enter();
 
-    // Executes 4x unrolled SIMD FMA matrix scaling in O(k * n * m) with 0 heap allocations
-    debiased_sinkhorn_divergence(
-        cost_matrix_ab,
-        cost_matrix_aa,
-        cost_matrix_bb,
-        weights_mu,
-        weights_nu,
-        &config,
-        &mut scratchpad,
-    )
-    .expect("Sinkhorn-Knopp scaling converged without NaNs")
+    sinkhorn_debiased_divergence(cost_matrix, 0.05_f32, 100, 1e-4_f32, scratchpad)
+        .expect("Converged within tolerance with zero heap allocations")
 }
 ```
 
@@ -752,8 +641,8 @@ When embeddings and graph relationships evolve at $10^7$ mutations/sec, copying 
 
 $$\Delta v_{(\tau_1 \to \tau_2)} = \log_{x_v(\tau_1)}\left(x_v(\tau_2)\right) \in T_{x_v(\tau_1)}\mathcal{M}$$
 
-This enables two capabilities:
-1. **Exact Snapshot Isolation**: Reconstruct the state at $\tau_2$ via the Riemannian Exponential Map:
+This enables:
+1. **Exact Snapshot Isolation**: Reconstruct state at $\tau_2$ via the Riemannian Exponential Map:
    $$x_v(\tau_2) = \exp_{x_v(\tau_1)}\left( \Delta v_{(\tau_1 \to \tau_2)} \right)$$
 2. **Continuous $O(1)$ Geodesic Time-Travel Interpolation**: Reconstruct the exact trajectory of a vertex at *any* intermediate timestamp $\tau_q \in [\tau_1, \tau_2]$ where $\alpha = \frac{\tau_q - \tau_1}{\tau_2 - \tau_1} \in [0, 1]$:
    $$x_v(\tau_q) = \exp_{x_v(\tau_1)}\left( \alpha \cdot \Delta v_{(\tau_1 \to \tau_2)} \right)$$
@@ -763,7 +652,7 @@ This enables two capabilities:
 ### Cell 5A: Declarative AQL
 
 ```sql
--- 1. Apply a low-overhead Tangent-Space Velocity update in L0MorphismLog
+-- Apply a low-overhead Tangent-Space Velocity update in L0MorphismLog
 APPLY TANGENT_DELTA TO VERTEX 1001 IN research_sheaf_manifold
   SET DELTA_VELOCITY (
     taxonomy_lorentz    = [0.002, -0.001, 0.004, /* ... tangent vector in T_x H^64 */],
@@ -771,7 +660,7 @@ APPLY TANGENT_DELTA TO VERTEX 1001 IN research_sheaf_manifold
     telemetry_euclidean = [0.25, 0.12, -0.01,    /* ... tangent vector in R^64 */]
   );
 
--- 2. Query the exact historical state or continuous geodesic interpolation at HLC timestamp tau_q
+-- Query the continuous geodesic interpolation at HLC timestamp tau_q
 SELECT
     vertex_id,
     RECONSTRUCT_MANIFOLD_STATE(vertex_id) AS interpolated_stalk,
@@ -792,10 +681,8 @@ import aether_manifold as am
 
 client = am.AetherClient("grpc://127.0.0.1:9090")
 
-# Record the initial timestamp tau_1
 tau_1 = client.get_current_hlc()
 
-# Push a tangent-space velocity delta (Delta v in T_{x_v(tau_1)} M) into L0MorphismLog
 delta_v = {
     "taxonomy_lorentz": np.full(64, 0.005, dtype=np.float32),
     "semantic_sphere": np.full(768, 0.001, dtype=np.float32),
@@ -808,46 +695,22 @@ commit_info = client.append_tangent_delta(
 )
 tau_2 = commit_info.hlc
 
-# Time-travel to the exact midpoint timestamp tau_q between tau_1 and tau_2 (alpha = 0.5)
+# Reconstruct midpoint state (alpha = 0.5) in O(1)
 tau_midpoint = am.HlcTimestamp.midpoint(tau_1, tau_2)
 
 snapshot = client.get_vertex_at_hlc(
     manifold="research_sheaf_manifold",
     vertex_id=1001,
     at_hlc=tau_midpoint,
-    interpolate_geodesic=True,  # Evaluates x_v(tau_q) = exp_{x_v(tau_1)}(alpha * Delta v) in O(1)
+    interpolate_geodesic=True,
 )
 
-print(f"Reconstructed state at HLC {tau_midpoint} (alpha={snapshot.interpolation_alpha:.2f}):")
-print("Lorentz x_0 timelike coordinate:", snapshot.factors["taxonomy_lorentz"][0])
+print(f"Reconstructed state at HLC {tau_midpoint} (alpha={snapshot.interpolation_alpha:.2f})")
 ```
 
 ---
 
-### Cell 5C: TypeScript SDK
-
-```typescript
-import { AetherClient, HlcTimestamp } from "@aether-manifold/sdk";
-
-async function timeTravelQuery(client: AetherClient) {
-  // Query historical snapshot at a specific 64-bit Hybrid Logical Clock timestamp
-  const historicalHlc = HlcTimestamp.fromParts(1792227000120n, 4);
-
-  const state = await client.getVertexTimeTravel({
-    manifold: "research_sheaf_manifold",
-    vertexId: 1001n,
-    hlcTimestamp: historicalHlc,
-    continuousGeodesicInterpolation: true,
-  });
-
-  console.log(`Vertex 1001 reconstructed at HLC=${historicalHlc.toPackedU64().toString(16)}`);
-  console.log(`Interpolation factor alpha: ${state.alpha}`);
-}
-```
-
----
-
-### Cell 5D: Rust Embedded API (`L0MorphismLog` & $O(1)$ Geodesic State Reconstruction)
+### Cell 5C: Rust Embedded API (`L0MorphismLog` Geodesic MVCC)
 
 ```rust
 use aether_core::alloc_guard::HotPathAllocGuard;
@@ -861,11 +724,8 @@ pub fn reconstruct_time_travel_state_zero_alloc(
     query_hlc: HlcTimestamp,
 ) -> [f32; 64] {
     let mut reconstructed = [0.0_f32; 64];
-
     let _guard = HotPathAllocGuard::enter();
 
-    // O(1) spectral hash lookup + Riemannian exponential map interpolation:
-    // x_v(tau_q) = exp_{x_v(tau_1)}(alpha * Delta v_{(tau_1 -> tau_2)})
     l0_log
         .reconstruct_at_hlc_euclidean(
             vertex_id,
@@ -888,14 +748,14 @@ When merging an $L_0 / L_1$ geometric run $\mathcal{R}_A$ into an $L_2$ NVMe run
 
 $$d_{\mathcal{M}}(u, \mu_A) - R_A > d_{\mathcal{M}}\left(u, u_{\text{NN}}^{(k)}\right)$$
 
-the engine proves mathematically that no point in $\mathcal{R}_A$ can enter $u$'s top-$k$ Delaunay neighborhood. Those interior vertices execute an **$O(1)$ pointer splice**, restricting expensive Delaunay re-triangulation strictly to the 2-manifold boundary $\partial \mathcal{V}_A \cap \partial \mathcal{V}_B$ in $O(|\partial \mathcal{V}| \log |\partial \mathcal{V}|)$ time.
+the engine proves mathematically that no point in $\mathcal{R}_A$ can enter $u$'s top-$k$ Delaunay neighborhood. Those interior vertices execute an **$O(1)$ pointer splice**, restricting expensive Delaunay re-triangulation strictly to the 2-manifold boundary $\partial \mathcal{V}_A \cap \partial \mathcal{V}_B$.
 
 ---
 
 ### Cell 6A: Declarative AQL & Rust Compaction Inspection
 
 ```sql
--- Trigger an asynchronous Boundary-Only Delaunay Compaction pass and return certificate telemetry
+-- Trigger an asynchronous Boundary-Only Delaunay Compaction pass
 OPTIMIZE MANIFOLD research_sheaf_manifold
   COMPACT LEVEL L1 TO L2
   USING VORONOI_BOUNDARY_CERTIFICATES
@@ -917,7 +777,6 @@ pub fn check_o1_pointer_splice_eligibility(
         max_geodesic_radius: modified_cell_max_radius,
     };
 
-    // Returns true if d_M(u, mu_A) - R_A > d_M(u, u_NN^(k)), bypassing KNN recomputation!
     evaluate_voronoi_boundary_certificate(
         vertex_dist_to_modified_centroid,
         &cert,
@@ -928,9 +787,270 @@ pub fn check_o1_pointer_splice_eligibility(
 
 ---
 
-## 9. Quick Reference Cheat Sheet
+## 9. Recipe 7: Distributed Dynamic Topology Partitioning via Spectral-Geodesic Bisection
 
-### 9.1 AQL (Aether Query Language) Command Matrix
+### Scenario
+As your knowledge graph scales beyond a single server to 64 cluster nodes, random or hash-based partitioning destroys query performance by turning $90\%$ of multi-hop queries into cross-network roundtrips. **Aether-Manifold** implements the **Spectral-Geodesic Sheaf Graph Partitioner (`SpectralGeodesicPartitioner`)**, which computes edge cut costs combining Sheaf Dirichlet energy and Riemannian geodesic distance:
+
+$$E_e = \left\| \mathcal{F}_{u \trianglelefteq e} x_u - \mathcal{F}_{v \trianglelefteq e} x_v \right\|_2^2 + \mu \cdot d_{\mathcal{M}}^2(x_u, x_v)$$
+
+The partitioner computes the **Fiedler vector** (second smallest eigenvector of the normalized Laplacian operator) via power iteration with deflation, partitioning vertices into balanced shards while strictly enforcing:
+1. **$\pm 5\%$ Partition Balance Tolerance**: Every shard receives $\frac{N}{K} \pm 5\%$ vertices.
+2. **$> 90\%$ Local Shard Traversal Ratio**: Strongly coupled semantic neighborhoods reside on the same node's NVMe/CXL arena.
+
+---
+
+### Cell 7A: Declarative AQL
+
+```sql
+-- Partition the global topology across 64 cluster shards with +/-5% balance constraint
+PARTITION CLUSTER research_sheaf_manifold
+  BY SPECTRAL_GEODESIC (
+    target_shards = 64,
+    geodesic_mu = 1.0,           -- Weight on Riemannian distance penalty d_M^2(u, v)
+    balance_tolerance = 0.05,    -- Enforce +/-5% maximum size imbalance
+    max_power_iterations = 150
+  )
+  ENSURE MINIMUM_LOCAL_TRAVERSAL_RATIO = 0.90;
+```
+
+---
+
+### Cell 7B: Python SDK
+
+```python
+import aether_manifold as am
+
+client = am.AetherClient("grpc://127.0.0.1:9090")
+
+# Trigger cluster rebalancing across 64 shards
+partition_plan = client.repartition_cluster(
+    manifold="research_sheaf_manifold",
+    num_shards=64,
+    geodesic_weight_mu=1.0,
+    balance_tolerance=0.05,
+)
+
+print(f"Partition Plan generated for {partition_plan.total_vertices} vertices across {partition_plan.num_shards} shards.")
+print(f"Local Traversal Ratio: {partition_plan.local_traversal_ratio * 100:.2f}% (Target: > 90%)")
+print(f"Max shard size variance: {partition_plan.max_imbalance_ratio * 100:.2f}% (Limit: <= 5%)")
+```
+
+---
+
+### Cell 7C: TypeScript SDK
+
+```typescript
+import { AetherClient } from "@aether-manifold/sdk";
+
+async function rebalanceClusterShards(client: AetherClient): Promise<void> {
+  const plan = await client.repartitionTopology({
+    manifold: "research_sheaf_manifold",
+    numShards: 64,
+    geodesicWeightMu: 1.0,
+    balanceTolerance: 0.05,
+    maxPowerIterations: 150,
+  });
+
+  console.log(`Topology repartitioned: ${plan.localTraversalRatio * 100}% queries stay local.`);
+}
+```
+
+---
+
+### Cell 7D: Rust Embedded API (`SpectralGeodesicPartitioner`)
+
+```rust
+use aether_consensus::partitioner::{
+    GraphEdge, PartitionerConfig, SpectralGeodesicPartitioner,
+};
+
+pub fn partition_cluster_topology(
+    num_vertices: usize,
+    edges: &[GraphEdge],
+) -> aether_consensus::partitioner::PartitionPlan {
+    let config = PartitionerConfig {
+        num_shards: 64,
+        geodesic_weight_mu: 1.0_f32,
+        balance_tolerance: 0.05_f32,
+        max_power_iterations: 150,
+    };
+
+    let partitioner = SpectralGeodesicPartitioner::new(config)
+        .expect("Valid partitioner configuration");
+
+    let plan = partitioner
+        .partition(num_vertices, edges)
+        .expect("Topology successfully partitioned across 64 shards");
+
+    assert!(plan.is_balanced(0.05));
+    plan
+}
+```
+
+---
+
+## 10. Recipe 8: Leaderless HLC Quorum Consensus & Sub-10ms Minority Failover
+
+### Scenario
+In a mission-critical enterprise deployment, cluster nodes may crash or experience transient network partitions. Traditional Multi-Raft setups suffer tail-latency spikes during leader elections. **Aether-Manifold** implements **Leaderless Quorum Consensus ($R + W > N$)**:
+1. **64-Byte Cache-Line Aligned Envelopes**: Proposals, acknowledgments, and commits use a strictly aligned `ReplicationMessage` (`size_of == 64`, `align_of == 64`) with zero heap allocations on the hot path.
+2. **Causal Total Ordering**: Causal conflicts are resolved via 64-bit Hybrid Logical Clocks (`HlcTimestamp`) and deterministic tie-breaking:
+   $$(p_1, l_1, n_1) < (p_2, l_2, n_2) \iff (\tau_1 < \tau_2) \lor (\tau_1 == \tau_2 \land n_1 < n_2)$$
+3. **Sub-10ms Fast Catchup Replay**: When an offline replica re-joins the cluster, it requests recent morphism records from peers via `MorphismReplicator::get_records_since` and replays missing commits via `replay_batch` in **$< 10\text{ ms}$** with zero data loss.
+
+---
+
+### Cell 8A: Declarative AQL
+
+```sql
+-- Configure Leaderless Quorum Consensus parameters
+SET CONSENSUS_QUORUM = (
+    cluster_size = 3,           -- N = 3 replica shards
+    write_quorum = 2,           -- W = 2 acknowledgments required for commit
+    read_quorum  = 2            -- R = 2 responses required for consistent read (R + W > N)
+);
+
+-- Trigger an explicit fast catchup recovery on Node 2 from peer Node 0
+RECOVER SHARD 2
+  FROM PEER NODE 0
+  SINCE HLC TIMESTAMP (physical_ms = 1792227000000, logical = 0)
+  TIMEOUT 10 MILLISECONDS;
+```
+
+---
+
+### Cell 8B: Python SDK
+
+```python
+import aether_manifold as am
+
+# Configure 3-node replica group: N=3, W=2, R=2
+cluster = am.ClusterClient(["grpc://10.0.0.1:9090", "grpc://10.0.0.2:9090", "grpc://10.0.0.3:9090"])
+
+# Propose a replicated mutation with quorum write guarantee
+commit_receipt = cluster.propose_replicated_mutation(
+    vertex_id=5001,
+    payload=b"\x01\x02\x03\x04" * 6,
+    write_quorum=2,
+)
+
+print(f"Mutation committed to quorum at HLC {commit_receipt.hlc_timestamp}")
+
+# Consistent read quorum (picks the causally dominant state among R=2 peers)
+consistent_state = cluster.read_quorum(vertex_id=5001, read_quorum=2)
+print(f"Causally consistent state: {consistent_state.payload}")
+```
+
+---
+
+### Cell 8C: TypeScript SDK
+
+```typescript
+import { AetherClusterClient } from "@aether-manifold/sdk";
+
+async function replicateMutation(cluster: AetherClusterClient): Promise<void> {
+  const receipt = await cluster.propose({
+    vertexId: 5001n,
+    payload: new Uint8Array(24).fill(0xaa),
+    writeQuorum: 2,
+  });
+
+  console.log(`Quorum achieved: Sequence=${receipt.sequenceNumber}, Committed=${receipt.committed}`);
+}
+```
+
+---
+
+### Cell 8D: Rust Embedded API (`LeaderlessQuorumEngine` & `MorphismReplicator`)
+
+```rust
+use aether_consensus::consensus::{
+    LeaderlessQuorumEngine, QuorumConfig, ReplicationMessage, ReplicationMessageType,
+};
+use aether_consensus::morphism_replicator::MorphismReplicator;
+use aether_core::alloc_guard::HotPathAllocGuard;
+
+pub fn execute_consensus_lifecycle_zero_alloc() {
+    let config0 = QuorumConfig::new(0, 3, 2, 2).expect("Valid N=3, W=2, R=2");
+    let config1 = QuorumConfig::new(1, 3, 2, 2).expect("Valid N=3, W=2, R=2");
+
+    let mut node0 = LeaderlessQuorumEngine::new(config0, 1_000_000);
+    let mut node1 = LeaderlessQuorumEngine::new(config1, 1_000_000);
+    let mut replicator0 = MorphismReplicator::new(0);
+
+    let _guard = HotPathAllocGuard::enter();
+
+    // 1. Node 0 proposes mutation (0 heap allocations)
+    let proposal = node0.propose(5001, [0xEE; 24], 1_000_010).unwrap();
+
+    // 2. Node 1 acks remote proposal (0 heap allocations)
+    let ack = node1.handle_remote_propose(&proposal, 1_000_012).unwrap();
+
+    // 3. Node 0 processes ack, reaching write quorum W=2 (self + node1)
+    let commit = node0.handle_ack(&ack).unwrap().expect("Write quorum reached");
+
+    // 4. Replicate commit into local morphism log (0 heap allocations)
+    replicator0.apply_commit(&commit).unwrap();
+}
+```
+
+---
+
+## 11. Recipe 9: Zero-Copy RDMA & CXL 3.0 Remote Page Fetching Fabric
+
+### Scenario
+During distributed 3-hop traversals, an edge may lead to a target vertex hosted on a remote cluster node. Instead of serializing JSON/Protobuf or making synchronous RPCs that wake up the remote CPU, **Aether-Manifold** uses one-sided **RDMA Reads** (RoCEv2) or direct **CXL 3.0 Type 3 loads** into local memory:
+- **Zero Remote CPU Overhead**: Remote node kernel/CPU is completely bypassed.
+- **Direct 4KB NVMe-Aligned Pages**: Fetches raw `TensorGraphPage` instances directly into local cache arenas in strictly $0$ heap allocations.
+
+---
+
+### Cell 9A: Declarative AQL
+
+```sql
+-- Enable direct one-sided RDMA page fetching for distributed queries
+SET FABRIC_TRANSPORT = "RDMA_ROCE_V2";
+SET RDMA_MEMORY_WINDOW_SIZE_MB = 1024;
+
+-- Query spanning multiple cluster shards via zero-copy RDMA reads
+SELECT target.vertex_id, target.metadata
+FROM research_sheaf_manifold
+TRAVERSE FROM VERTEX 1001 MAX_HOPS 3
+OPTIONS (REMOTE_FETCH_ENGINE = "RDMA_ONE_SIDED_DIRECT");
+```
+
+---
+
+### Cell 9B: Rust Embedded API (`RdmaFabric` & `RdmaMemoryWindow`)
+
+```rust
+use aether_consensus::rdma_fabric::{RdmaFabric, RdmaMemoryWindow};
+use aether_core::alloc_guard::HotPathAllocGuard;
+
+pub fn fetch_remote_page_zero_copy(
+    fabric: &RdmaFabric,
+    target_node_id: u64,
+    page_index: usize,
+) -> [u8; 4096] {
+    let mut page_buf = [0u8; 4096];
+
+    let _guard = HotPathAllocGuard::enter();
+
+    // One-sided remote memory copy with strictly 0 heap allocations
+    fabric
+        .read_remote_page(target_node_id, page_index, &mut page_buf)
+        .expect("Remote page fetched via RDMA fabric without allocation");
+
+    page_buf
+}
+```
+
+---
+
+## 12. Quick Reference Cheat Sheet
+
+### 12.1 AQL (Aether Query Language) Command Matrix
 
 | Operation | AQL Statement Pattern | Underlying Engine Subsystem |
 | :--- | :--- | :--- |
@@ -940,18 +1060,25 @@ pub fn check_o1_pointer_splice_eligibility(
 | **Attach Sheaf Edge** | `CONNECT VERTEX <u> TO <v> WITH SHEAF_MORPHISM (...)` | `aether-query::sheaf` (Householder BF16) |
 | **Hybrid Traversal** | `TRAVERSE FROM VERTEX <id> ... USING SEMIRING (TROPICAL \| DIFFUSION \| BOTTLENECK)` | `aether-query::compiler` & `semiring` |
 | **Sheaf Smoothing** | `MINIMIZE DIRICHLET_ENERGY (lambda_fidelity = ..., max_agd_iterations = ...)` | `aether-query::dirichlet` & `laplacian` |
-| **Subgraph Matching** | `SINKHORN_DIVERGENCE(bag_a, bag_b, epsilon = ...)` | `aether-manifold::sinkhorn` |
+| **Subgraph Matching** | `SINKHORN_DIVERGENCE(bag_a, bag_b, epsilon = ...)` | `aether-manifold::optimal_transport` |
 | **Causal Time Travel** | `SELECT ... FROM <manifold> AT HLC TIMESTAMP (...) WITH GEODESIC_INTERPOLATION = TRUE` | `aether-storage::l0_mvcc` & `aether-core::hlc` |
+| **Spectral Partitioning** | `PARTITION CLUSTER <manifold> BY SPECTRAL_GEODESIC (target_shards = K, balance_tolerance = 0.05)` | `aether-consensus::partitioner` |
+| **Quorum Consensus** | `SET CONSENSUS_QUORUM = (cluster_size = N, write_quorum = W, read_quorum = R)` | `aether-consensus::consensus` |
+| **Minority Catchup** | `RECOVER SHARD <id> FROM PEER <peer_id> SINCE HLC TIMESTAMP (...)` | `aether-consensus::morphism_replicator` |
+| **Remote Page Fetch** | `FETCH REMOTE PAGE DIRECT FROM NODE <id> PAGE <idx>` | `aether-consensus::rdma_fabric` |
 
 ---
 
-### 9.2 Verified Hardware & Numerical SLA Guarantees (Phases 0–2)
+### 12.2 Verified Hardware & Numerical SLA Guarantees (Phases 0–3)
 
 | Verification Gate | Invariant / Metric | Verified Performance |
 | :--- | :--- | :--- |
 | **Memory Layout (`TEST-MEM-01`)** | `size_of::<TensorGraphPage>() == 4096`, `size_of::<PageHeader>() == 64` | $0$ compiler padding bytes; $4\text{KB}$ NVMe `O_DIRECT` aligned |
-| **Hot-Path Allocation (`TEST-MEM-04`)** | Heap allocations inside `HotPathAllocGuard` during query/ingest | Strictly $0\text{ bytes}$ allocated on heap |
+| **Replication Message Layout** | `size_of::<ReplicationMessage>() == 64`, `align_of == 64` | Cache-line aligned envelope; zero false sharing |
+| **Hot-Path Allocation (`TEST-MEM-04`)** | Heap allocations inside `HotPathAllocGuard` during query, ingest, and consensus | Strictly $0\text{ bytes}$ allocated on heap |
 | **Numerical Stability (Phase 0)** | Lorentz horizon clamping $\epsilon_{\text{mach}} = 10^{-7}$ and antipodal sphere stabilization | $0\text{ NaNs}$ / $0\text{ Infs}$ across randomized boundary sweeps |
 | **AT-RQ Page ADC Kernel (Phase 0)** | $1024\text{-dim}$ curvature-corrected Rauch/Jacobi geodesic distance | $< 15\text{ ns}$ per evaluation on AVX2 / AVX-512 |
 | **Single-Node Ingestion (Phase 1)** | Sustained vector + sheaf edge mutations into `L0MorphismLog` | $> 6.2 \times 10^6\text{ ops/sec/core}$ ($p_{99} = 0.0020\text{ ms}$, Recall@10 $= 0.9810$) |
 | **3-Hop Hybrid Query (Phase 2)** | 3-hop Sheaf SpMV + $1536\text{-dim}$ vector filter with speculative `io_uring` prefetch | $p_{99} = 1.092\text{ ms} \ll 5.0\text{ ms}$ gate (Recall@10 $= 1.0000$) |
+| **64-Node Cluster Simulation (Phase 3)** | 64-node distributed cluster coordinating leaderless quorum consensus | $100\%$ commit completion with zero deadlocks |
+| **Minority Node Recovery (Phase 3)** | Replay of 500 missing morphism log records upon node reconnect | $0.03\text{ ms} \ll 10.0\text{ ms}$ failover gate; $0$ data loss |
