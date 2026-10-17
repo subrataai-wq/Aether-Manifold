@@ -1,3 +1,5 @@
+# Lets check my stupid Database Engine Design (-\_-)
+
 # Aether-Manifold
 
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
@@ -41,14 +43,14 @@
 
 The project is structured as a Cargo workspace with strict jurisdictional boundaries:
 
-| Crate | Responsibility | Key Technologies |
-| :--- | :--- | :--- |
-| [`crates/aether-core`](./crates/aether-core) | 4KB `TensorGraphPage`, 64B `PageHeader`, `HlcTimestamp` clock, `HotPathAllocGuard` | `zerocopy`, `bytemuck`, `crc32fast` |
-| [`crates/aether-manifold`](./crates/aether-manifold) | Product Manifold SIMD metrics ($\mathbb{H} \times \mathbb{S} \times \mathbb{R}$), Sheaf Laplacian, AT-RQ | `pulp` SIMD, `libm`, `faer-core`, `half` |
-| [`crates/aether-storage`](./crates/aether-storage) | KLSM-Tree, $L_0$ Morphism Log, Boundary-Only Voronoi compaction, `io_uring` WAL | `io-uring`, `portable-atomic`, `bumpalo` |
-| [`crates/aether-query`](./crates/aether-query) | Semiring-Sheaf Algebraic Compiler, Tropical/Diffusion SpMV, speculative lookahead | `bumpalo`, `pulp`, `dyn-stack` |
-| [`crates/aether-consensus`](./crates/aether-consensus) | Thread-per-core actor reactor, lock-free SPSC rings, leaderless HLC consensus | `crossbeam-utils`, `portable-atomic` |
-| [`crates/aether-verify`](./crates/aether-verify) | 4-Stage verification gate, deterministic I/O chaos, property fuzzing, PMU counters | `proptest`, `loom`, `oorandom` |
+| Crate                                                  | Responsibility                                                                                           | Key Technologies                         |
+| :----------------------------------------------------- | :------------------------------------------------------------------------------------------------------- | :--------------------------------------- |
+| [`crates/aether-core`](./crates/aether-core)           | 4KB `TensorGraphPage`, 64B `PageHeader`, `HlcTimestamp` clock, `HotPathAllocGuard`                       | `zerocopy`, `bytemuck`, `crc32fast`      |
+| [`crates/aether-manifold`](./crates/aether-manifold)   | Product Manifold SIMD metrics ($\mathbb{H} \times \mathbb{S} \times \mathbb{R}$), Sheaf Laplacian, AT-RQ | `pulp` SIMD, `libm`, `faer-core`, `half` |
+| [`crates/aether-storage`](./crates/aether-storage)     | KLSM-Tree, $L_0$ Morphism Log, Boundary-Only Voronoi compaction, `io_uring` WAL                          | `io-uring`, `portable-atomic`, `bumpalo` |
+| [`crates/aether-query`](./crates/aether-query)         | Semiring-Sheaf Algebraic Compiler, Tropical/Diffusion SpMV, speculative lookahead                        | `bumpalo`, `pulp`, `dyn-stack`           |
+| [`crates/aether-consensus`](./crates/aether-consensus) | Thread-per-core actor reactor, lock-free SPSC rings, leaderless HLC consensus                            | `crossbeam-utils`, `portable-atomic`     |
+| [`crates/aether-verify`](./crates/aether-verify)       | 4-Stage verification gate, deterministic I/O chaos, property fuzzing, PMU counters                       | `proptest`, `loom`, `oorandom`           |
 
 ---
 
@@ -56,10 +58,10 @@ The project is structured as a Cargo workspace with strict jurisdictional bounda
 
 ### Prerequisites
 
-* **Rust**: Toolchain pinned via `rust-toolchain.toml` (1.80+ stable).
-* **Target Platforms**:
-  * Cross-platform (Linux, Windows, macOS) for core math, memory layouts, and verification suites.
-  * Bare-metal Linux ($\ge 6.1$) recommended for production `io_uring` direct I/O and hardware PMU counters.
+- **Rust**: Toolchain pinned via `rust-toolchain.toml` (1.80+ stable).
+- **Target Platforms**:
+  - Cross-platform (Linux, Windows, macOS) for core math, memory layouts, and verification suites.
+  - Bare-metal Linux ($\ge 6.1$) recommended for production `io_uring` direct I/O and hardware PMU counters.
 
 ### Building & Testing
 
@@ -96,12 +98,12 @@ cargo test --package aether-verify --release
 
 ## Documentation
 
-* [Architectural Blueprint (`docs/roadmap.md`)](./docs/roadmap.md) — Mathematical derivations and 1-year phased roadmap.
-* [Engineering Constitution (`docs/agents.md`)](./docs/agents.md) — Non-negotiable hardware sympathy rules and agent jurisdictions.
-* [Rust Crate Blueprint (`docs/rust_crates_guide.md`)](./docs/rust_crates_guide.md) — Approved bare-metal dependencies and banned ecosystem libraries.
-* [Test Suite Manifest (`docs/test_suite_manifest.md`)](./docs/test_suite_manifest.md) — Master 60-gate pre-publish verification catalog.
-* [Roadmap Tracker (`docs/ROADMAP_TRACKER.md`)](./docs/ROADMAP_TRACKER.md) — Active milestone and implementation tracker.
-* [Contributing Guide (`CONTRIBUTING.md`)](./CONTRIBUTING.md) — Code standards, PR checklist, and verification protocols.
+- [Architectural Blueprint (`docs/roadmap.md`)](./docs/roadmap.md) — Mathematical derivations and 1-year phased roadmap.
+- [Engineering Constitution (`docs/agents.md`)](./docs/agents.md) — Non-negotiable hardware sympathy rules and agent jurisdictions.
+- [Rust Crate Blueprint (`docs/rust_crates_guide.md`)](./docs/rust_crates_guide.md) — Approved bare-metal dependencies and banned ecosystem libraries.
+- [Test Suite Manifest (`docs/test_suite_manifest.md`)](./docs/test_suite_manifest.md) — Master 60-gate pre-publish verification catalog.
+- [Roadmap Tracker (`docs/ROADMAP_TRACKER.md`)](./docs/ROADMAP_TRACKER.md) — Active milestone and implementation tracker.
+- [Contributing Guide (`CONTRIBUTING.md`)](./CONTRIBUTING.md) — Code standards, PR checklist, and verification protocols.
 
 ---
 
