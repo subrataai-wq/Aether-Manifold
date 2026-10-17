@@ -6,6 +6,8 @@ This document governs all autonomous AI coding agents, mathematical synthesis ag
 
 ---
 
+#### (DONT REPEAT YOURSELF)
+
 ## 1. Core Principles & First-Principles Mandate
 
 All code you write MUST be fully optimized for hardware sympathy, numerical stability, and zero-allocation hot-path execution:
