@@ -15,7 +15,7 @@ bytemuck = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { workspace = true }
+libc = "0.2"
 
 [lints]
 workspace = true
-

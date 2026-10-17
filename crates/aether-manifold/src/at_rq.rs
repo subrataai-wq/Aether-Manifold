@@ -9,7 +9,9 @@
 
 use crate::simd::{simd_dot_product, simd_euclidean_distance_squared};
 use aether_core::error::AetherError;
-use aether_core::page::TensorGraphPage;
+use aether_core::page::{
+    f16_bits_to_f32, f32_to_f16_bits, TensorGraphPage, PAGE_FLAG_HAS_FP16_SPILLOVER,
+};
 
 /// Exactly 32-byte packed representation of a quantized neighbor vector for TensorGraphPage.
 ///
@@ -641,5 +643,259 @@ pub fn at_rq_score_page_neighbors(
             expected: 1,
         }),
         _ => score_page_neighbors_const_k::<16>(qc_norm_sq, query_lut, kappa, page, out_distances),
+    }
+}
+
+/// Distortion certificate tracking AT-RQ quantization error and FP16 spillover state.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DistortionCertificate {
+    /// Euclidean norm of quantization residual $r = v - \hat{v}$.
+    pub residual_norm: f32,
+    /// Maximum allowed distortion tolerance before spilling to FP16.
+    pub delta_max: f32,
+    /// True if the residual exceeded $\delta_{\max}$ and spilled to FP16 slots.
+    pub spilled_to_fp16: bool,
+    /// Final residual norm after subtracting decoded FP16 spillover (if applied).
+    pub post_spill_residual_norm: f32,
+}
+
+/// Anisotropic Tangent-Space Residual Quantizer (AT-RQ) instance with codebooks.
+#[derive(Clone, Debug)]
+pub struct AnisotropicTangentQuantizer {
+    centroids_per_subspace: usize,
+    dimension: usize,
+    codebooks: Vec<f32>,
+}
+
+impl AnisotropicTangentQuantizer {
+    /// Create a new AT-RQ quantizer with validated dimension and codebooks.
+    pub fn new(
+        dimension: usize,
+        centroids_per_subspace: usize,
+        codebooks: Vec<f32>,
+    ) -> Result<Self, AetherError> {
+        if dimension == 0 || !dimension.is_multiple_of(24) {
+            return Err(AetherError::InvalidBufferSize {
+                actual: dimension,
+                expected: 24,
+            });
+        }
+        if centroids_per_subspace == 0 || centroids_per_subspace > 256 {
+            return Err(AetherError::InvalidBufferSize {
+                actual: centroids_per_subspace,
+                expected: 256,
+            });
+        }
+        let d_sub = dimension / 24;
+        let required_codebook_len = 24 * centroids_per_subspace * d_sub;
+        if codebooks.len() < required_codebook_len {
+            return Err(AetherError::InvalidBufferSize {
+                actual: codebooks.len(),
+                expected: required_codebook_len,
+            });
+        }
+
+        Ok(Self {
+            centroids_per_subspace,
+            dimension,
+            codebooks,
+        })
+    }
+
+    /// Tangent vector dimension.
+    #[inline]
+    pub fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    /// Number of centroids per subspace $K$.
+    #[inline]
+    pub fn centroids_per_subspace(&self) -> usize {
+        self.centroids_per_subspace
+    }
+
+    /// Centroid codebook weights.
+    #[inline]
+    pub fn codebooks(&self) -> &[f32] {
+        &self.codebooks
+    }
+
+    /// Quantize a primary vertex tangent vector into `page.at_rq_codebooks[0..32]`.
+    ///
+    /// If $\|r\|_2 > \delta_{\max}$, the first 16 residual components are spilled into the
+    /// reserved FP16 spillover slots in `page.sheaf_edge_weights` (bytes 1184..1216) and
+    /// `PAGE_FLAG_HAS_FP16_SPILLOVER` is set in the header flags.
+    ///
+    /// # Invariants
+    /// - Strictly 0 heap allocations inside this function.
+    pub fn encode_page_primary_with_certificate(
+        &self,
+        v_tangent: &[f32],
+        delta_max: f32,
+        page: &mut TensorGraphPage,
+    ) -> Result<DistortionCertificate, AetherError> {
+        if v_tangent.len() != self.dimension {
+            return Err(AetherError::InvalidBufferSize {
+                actual: v_tangent.len(),
+                expected: self.dimension,
+            });
+        }
+        if self.dimension > 1032 {
+            return Err(AetherError::InvalidBufferSize {
+                actual: self.dimension,
+                expected: 1032,
+            });
+        }
+
+        let mut code = CompactNeighborCode::ZERO;
+        at_rq_encode_neighbor(
+            v_tangent,
+            &self.codebooks,
+            self.centroids_per_subspace,
+            &mut code,
+        )?;
+
+        // Write 32-byte code into page.at_rq_codebooks[0..32]
+        if let Some(target) = page.at_rq_codebooks.get_mut(0..32) {
+            target.copy_from_slice(code.as_bytes());
+        }
+
+        // Reconstruct v_hat on stack
+        let mut v_hat_buf = [0.0f32; 1032];
+        let v_hat = match v_hat_buf.get_mut(..self.dimension) {
+            Some(s) => s,
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: self.dimension,
+                    limit: 1032,
+                })
+            }
+        };
+        at_rq_decode_neighbor(&code, &self.codebooks, self.centroids_per_subspace, v_hat)?;
+
+        // Compute residual vector r = v - v_hat
+        let mut r_buf = [0.0f32; 1032];
+        let r = match r_buf.get_mut(..self.dimension) {
+            Some(s) => s,
+            None => {
+                return Err(AetherError::OutOfBounds {
+                    index: self.dimension,
+                    limit: 1032,
+                })
+            }
+        };
+        for (r_slot, (&v_val, &v_hat_val)) in r.iter_mut().zip(v_tangent.iter().zip(v_hat.iter())) {
+            *r_slot = v_val - v_hat_val;
+        }
+
+        let residual_norm = simd_dot_product(r, r).sqrt();
+
+        if residual_norm > delta_max {
+            let limit = 16.min(self.dimension);
+            if let Some(slice) = r.get(..limit) {
+                page.write_fp16_residual_spillover(slice);
+            }
+
+            // Compute post-spill residual norm
+            let mut post_r_buf = [0.0f32; 1032];
+            let post_r = match post_r_buf.get_mut(..self.dimension) {
+                Some(s) => s,
+                None => {
+                    return Err(AetherError::OutOfBounds {
+                        index: self.dimension,
+                        limit: 1032,
+                    })
+                }
+            };
+            post_r.copy_from_slice(r);
+
+            for post_slot in post_r.iter_mut().take(limit) {
+                let bits = f32_to_f16_bits(*post_slot);
+                let decoded = f16_bits_to_f32(bits);
+                *post_slot -= decoded;
+            }
+
+            let post_spill_residual_norm = simd_dot_product(post_r, post_r).sqrt();
+
+            Ok(DistortionCertificate {
+                residual_norm,
+                delta_max,
+                spilled_to_fp16: true,
+                post_spill_residual_norm,
+            })
+        } else {
+            // Clear spillover flag and zero residual slots if previously set
+            if (page.header.flags & PAGE_FLAG_HAS_FP16_SPILLOVER) != 0 {
+                page.header.flags &= !PAGE_FLAG_HAS_FP16_SPILLOVER;
+                if let Some(target_bytes) = page.sheaf_edge_weights.get_mut(1184..1216) {
+                    target_bytes.fill(0);
+                }
+            }
+            page.header.update_checksum();
+
+            Ok(DistortionCertificate {
+                residual_norm,
+                delta_max,
+                spilled_to_fp16: false,
+                post_spill_residual_norm: residual_norm,
+            })
+        }
+    }
+
+    /// Decode a primary vertex tangent vector from `page.at_rq_codebooks[0..32]`,
+    /// adding decoded FP16 spillover if `PAGE_FLAG_HAS_FP16_SPILLOVER` is set in page header.
+    ///
+    /// # Invariants
+    /// - Strictly 0 heap allocations inside this function.
+    pub fn decode_page_primary_with_spillover(
+        &self,
+        page: &TensorGraphPage,
+        out_tangent: &mut [f32],
+    ) -> Result<(), AetherError> {
+        if out_tangent.len() != self.dimension {
+            return Err(AetherError::InvalidBufferSize {
+                actual: out_tangent.len(),
+                expected: self.dimension,
+            });
+        }
+
+        let code_bytes: &[u8; 32] = match page.at_rq_codebooks.get(0..32) {
+            Some(slice) => slice
+                .try_into()
+                .map_err(|_| AetherError::InvalidBufferSize {
+                    actual: 0,
+                    expected: 32,
+                })?,
+            None => {
+                return Err(AetherError::InvalidBufferSize {
+                    actual: 0,
+                    expected: 32,
+                });
+            }
+        };
+
+        let code = CompactNeighborCode::from_bytes(code_bytes);
+        at_rq_decode_neighbor(
+            code,
+            &self.codebooks,
+            self.centroids_per_subspace,
+            out_tangent,
+        )?;
+
+        if (page.header.flags & PAGE_FLAG_HAS_FP16_SPILLOVER) != 0 {
+            let mut spill = [0.0f32; 16];
+            if page.read_fp16_residual_spillover(&mut spill) {
+                let limit = 16.min(self.dimension);
+                for i in 0..limit {
+                    if let (Some(out_slot), Some(&spill_val)) =
+                        (out_tangent.get_mut(i), spill.get(i))
+                    {
+                        *out_slot += spill_val;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }

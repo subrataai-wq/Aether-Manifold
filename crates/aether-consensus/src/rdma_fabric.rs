@@ -6,7 +6,7 @@
 //! zero OS locks on the transfer hot path (AGENTS.md Rule 3.1 & Rule 3.2).
 
 use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use aether_core::error::AetherError;
@@ -15,37 +15,47 @@ use aether_core::page::TensorGraphPage;
 /// Maximum number of cluster nodes supported by the virtual RDMA fabric.
 pub const MAX_RDMA_NODES: usize = 64;
 
-/// 64-byte cache-line aligned lock-free page slot with optimistic SeqLock (Rule 3.2).
+/// 64-byte cache-line aligned lock-free page slot with atomic double-buffering (Rule 3.2).
 #[repr(C, align(64))]
 pub struct LockFreeRdmaSlot {
+    active_idx: AtomicUsize,
     seq_version: AtomicU64,
-    page: UnsafeCell<TensorGraphPage>,
+    buffers: [UnsafeCell<TensorGraphPage>; 2],
 }
 
 unsafe impl Sync for LockFreeRdmaSlot {}
 unsafe impl Send for LockFreeRdmaSlot {}
 
 impl LockFreeRdmaSlot {
-    /// Creates a new zeroed lock-free page slot.
+    /// Creates a new zeroed lock-free double-buffered page slot.
     pub fn new() -> Self {
         Self {
+            active_idx: AtomicUsize::new(0),
             seq_version: AtomicU64::new(0),
-            page: UnsafeCell::new(bytemuck::Zeroable::zeroed()),
+            buffers: [
+                UnsafeCell::new(bytemuck::Zeroable::zeroed()),
+                UnsafeCell::new(bytemuck::Zeroable::zeroed()),
+            ],
         }
     }
 
-    /// Single-writer lock-free page write into the slot.
+    /// Single-writer lock-free page write into the alternate buffer.
     #[inline]
     pub fn write_page(&self, src: &[u8; 4096]) {
         let v = self.seq_version.fetch_add(1, Ordering::Acquire);
-        unsafe {
-            let page_ptr = self.page.get() as *mut u8;
-            core::ptr::copy_nonoverlapping(src.as_ptr(), page_ptr, 4096);
+        let curr = self.active_idx.load(Ordering::Acquire) & 1;
+        let next = 1 - curr;
+        if let Some(buf) = self.buffers.get(next) {
+            unsafe {
+                let page_ptr = buf.get() as *mut u8;
+                core::ptr::copy_nonoverlapping(src.as_ptr(), page_ptr, 4096);
+            }
+            self.active_idx.store(next, Ordering::Release);
+            self.seq_version.store(v.wrapping_add(2), Ordering::Release);
         }
-        self.seq_version.store(v.wrapping_add(2), Ordering::Release);
     }
 
-    /// Optimistic lock-free read into `dest`. Returns `true` if read was consistent.
+    /// Optimistic lock-free read into `dest` from the active buffer. Returns `true` if read was consistent.
     #[inline]
     pub fn read_page(&self, dest: &mut [u8; 4096]) -> bool {
         for _ in 0..64 {
@@ -55,15 +65,18 @@ impl LockFreeRdmaSlot {
                 continue;
             }
 
-            unsafe {
-                let page_ptr = self.page.get() as *const u8;
-                core::ptr::copy_nonoverlapping(page_ptr, dest.as_mut_ptr(), 4096);
-            }
+            let idx = self.active_idx.load(Ordering::Acquire) & 1;
+            if let Some(buf) = self.buffers.get(idx) {
+                unsafe {
+                    let page_ptr = buf.get() as *const u8;
+                    core::ptr::copy_nonoverlapping(page_ptr, dest.as_mut_ptr(), 4096);
+                }
 
-            core::sync::atomic::fence(Ordering::Acquire);
-            let v2 = self.seq_version.load(Ordering::Relaxed);
-            if v1 == v2 {
-                return true;
+                core::sync::atomic::fence(Ordering::Acquire);
+                let v2 = self.seq_version.load(Ordering::Acquire);
+                if v1 == v2 {
+                    return true;
+                }
             }
         }
         false
@@ -319,5 +332,48 @@ impl RdmaFabric {
 impl Default for RdmaFabric {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Zero-allocation RDMA transport trait for one-sided remote memory access.
+pub trait RdmaTransportBackend {
+    /// Posts an asynchronous one-sided RDMA read into local `dst_page`.
+    fn post_one_sided_read(
+        &self,
+        target_node: u16,
+        page_slot: usize,
+        dst_page: &mut TensorGraphPage,
+    ) -> Result<(), AetherError>;
+
+    /// Posts an asynchronous one-sided RDMA write from local `src_page`.
+    fn post_one_sided_write(
+        &self,
+        target_node: u16,
+        page_slot: usize,
+        src_page: &TensorGraphPage,
+    ) -> Result<(), AetherError>;
+}
+
+impl RdmaTransportBackend for RdmaFabric {
+    fn post_one_sided_read(
+        &self,
+        target_node: u16,
+        page_slot: usize,
+        dst_page: &mut TensorGraphPage,
+    ) -> Result<(), AetherError> {
+        self.read_remote_page(
+            target_node as u64,
+            page_slot,
+            dst_page.as_aligned_bytes_mut(),
+        )
+    }
+
+    fn post_one_sided_write(
+        &self,
+        target_node: u16,
+        page_slot: usize,
+        src_page: &TensorGraphPage,
+    ) -> Result<(), AetherError> {
+        self.write_remote_page(target_node as u64, page_slot, src_page.as_aligned_bytes())
     }
 }

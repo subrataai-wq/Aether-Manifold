@@ -16,6 +16,9 @@ pub mod ricci_flow;
 pub mod sheaf_opt;
 
 pub use churn_controller::{AtomicCurvatureSnapshot, AutonomousChurnCoordinator, ChurnTelemetry};
-pub use dma_compaction::{DmaCompactionEngine, DmaCompactionTelemetry, DmaPageDescriptor};
+pub use dma_compaction::{
+    DmaCompactionEngine, DmaCompactionTelemetry, DmaOffloadBackend, DmaPageDescriptor,
+    HostLoopbackDmaBackend,
+};
 pub use ricci_flow::{EdgeCurvature, RicciFlowConfig, RicciFlowOptimizer};
 pub use sheaf_opt::SheafMorphismOptimizer;

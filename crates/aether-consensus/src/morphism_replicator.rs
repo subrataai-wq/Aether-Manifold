@@ -81,6 +81,8 @@ pub struct MorphismReplicator {
     log_head: usize,
     total_committed: usize,
     vertex_table: Box<[VertexSlot; MAX_TRACKED_VERTICES]>,
+    occupied_count: usize,
+    evicted_count: u64,
 }
 
 impl MorphismReplicator {
@@ -94,6 +96,8 @@ impl MorphismReplicator {
             log_head: 0,
             total_committed: 0,
             vertex_table,
+            occupied_count: 0,
+            evicted_count: 0,
         }
     }
 
@@ -107,6 +111,18 @@ impl MorphismReplicator {
     #[inline]
     pub const fn total_committed(&self) -> usize {
         self.total_committed
+    }
+
+    /// Returns the number of currently occupied vertex slots in the table.
+    #[inline]
+    pub const fn occupied_count(&self) -> usize {
+        self.occupied_count
+    }
+
+    /// Returns the cumulative count of vertices evicted under HLC-LRU pressure.
+    #[inline]
+    pub const fn evicted_count(&self) -> u64 {
+        self.evicted_count
     }
 
     /// Applies a validated commit message to the local morphism log and vertex state.
@@ -142,10 +158,13 @@ impl MorphismReplicator {
         self.upsert_vertex(record.vertex_id, record.hlc_timestamp, record.payload);
     }
 
-    /// Open-addressed linear probing to update latest vertex state.
+    /// Open-addressed linear probing to update latest vertex state with deterministic HLC-LRU eviction.
     fn upsert_vertex(&mut self, vertex_id: u64, hlc: u64, payload: [u8; 24]) {
         let mask = MAX_TRACKED_VERTICES.saturating_sub(1);
         let mut idx = ((vertex_id as usize) ^ ((vertex_id >> 16) as usize)) & mask;
+
+        let mut oldest_idx = usize::MAX;
+        let mut oldest_hlc = u64::MAX;
 
         for _ in 0..MAX_TRACKED_VERTICES {
             if let Some(slot) = self.vertex_table.get_mut(idx) {
@@ -154,6 +173,7 @@ impl MorphismReplicator {
                     slot.vertex_id = vertex_id;
                     slot.latest_hlc = hlc;
                     slot.latest_payload = payload;
+                    self.occupied_count = self.occupied_count.saturating_add(1);
                     return;
                 } else if slot.vertex_id == vertex_id {
                     // Last-Write-Wins: only update if incoming HLC is strictly newer
@@ -162,9 +182,25 @@ impl MorphismReplicator {
                         slot.latest_payload = payload;
                     }
                     return;
+                } else {
+                    if slot.latest_hlc < oldest_hlc {
+                        oldest_hlc = slot.latest_hlc;
+                        oldest_idx = idx;
+                    }
                 }
             }
             idx = (idx.saturating_add(1)) & mask;
+        }
+
+        // Table is 100% full and vertex_id not found: deterministic HLC-LRU eviction
+        if oldest_idx != usize::MAX {
+            if let Some(slot) = self.vertex_table.get_mut(oldest_idx) {
+                slot.occupied = true;
+                slot.vertex_id = vertex_id;
+                slot.latest_hlc = hlc;
+                slot.latest_payload = payload;
+                self.evicted_count = self.evicted_count.saturating_add(1);
+            }
         }
     }
 

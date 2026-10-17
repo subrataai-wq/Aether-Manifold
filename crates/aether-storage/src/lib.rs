@@ -6,16 +6,23 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 pub mod io_driver;
+pub mod klsm_coordinator;
 pub mod l0_mvcc;
 pub mod page_arena;
 pub mod shard_runtime;
 pub mod spsc;
 pub mod voronoi_compaction;
 
-pub use io_driver::{FileDirectDriver, IoCompletion};
+pub use io_driver::{DirectPageIoDriver, FileDirectDriver, IoCompletion};
+pub use klsm_coordinator::{
+    CompactionReport, KlsmRunManifest, KlsmTierCoordinator, MAX_PAGES_PER_RUN,
+};
 pub use l0_mvcc::{L0MorphismLog, TangentDeltaEntry};
 pub use page_arena::AlignedPageArena;
-pub use shard_runtime::{CoreShardRuntime, IoCompletionCqe, IoOpcode, IoSubmissionSqe};
+pub use shard_runtime::{
+    pin_current_thread_to_core, CoreShardRuntime, IoCompletionCqe, IoOpcode, IoSubmissionSqe,
+    ShardTelemetrySnapshot,
+};
 pub use spsc::{CachePaddedAtomicUsize, SpscRingBuffer};
 pub use voronoi_compaction::{
     evaluate_voronoi_boundary_certificate, execute_boundary_only_compaction,

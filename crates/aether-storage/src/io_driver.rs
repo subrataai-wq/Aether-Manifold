@@ -35,6 +35,8 @@ pub mod linux_uring {
         ring: IoUring,
         _fd: RawFd,
         _file: File,
+        arena_base_ptr: usize,
+        arena_slots: usize,
     }
 
     impl UringDirectDriver {
@@ -63,6 +65,9 @@ pub mod linux_uring {
                     code: e.raw_os_error().unwrap_or(-2),
                 })?;
 
+            let arena_base_ptr = arena_pages.as_ptr() as usize;
+            let arena_slots = arena_pages.len();
+
             // Pin 4096-byte aligned TensorGraphPage arena as fixed kernel buffers
             let iovecs: Vec<libc::iovec> = arena_pages
                 .iter()
@@ -89,6 +94,8 @@ pub mod linux_uring {
                 ring,
                 _fd: fd,
                 _file: file,
+                arena_base_ptr,
+                arena_slots,
             })
         }
 
@@ -101,8 +108,13 @@ pub mod linux_uring {
             is_write: bool,
             user_data: u64,
         ) -> Result<(), AetherError> {
+            if (arena_slot as usize) >= self.arena_slots {
+                return Err(AetherError::InvalidPageSlot {
+                    slot: arena_slot as usize,
+                });
+            }
             let byte_offset = disk_page_offset * 4096;
-            let ptr = (arena_slot as usize) as *mut u8;
+            let ptr = (self.arena_base_ptr + (arena_slot as usize) * 4096) as *mut u8;
 
             let sqe = if is_write {
                 opcode::WriteFixed::new(types::Fixed(0), ptr, 4096, arena_slot)
@@ -155,6 +167,59 @@ pub mod linux_uring {
             }
             count
         }
+    }
+}
+
+/// Unified direct page I/O driver abstraction.
+pub enum DirectPageIoDriver {
+    /// Linux kernel io_uring direct I/O driver.
+    #[cfg(target_os = "linux")]
+    Uring(linux_uring::UringDirectDriver),
+    /// Cross-platform synchronous direct file driver.
+    File(FileDirectDriver),
+}
+
+impl DirectPageIoDriver {
+    /// Creates a memory-only driver (useful for testing and environments without block storage).
+    pub fn memory_only() -> Self {
+        Self::File(FileDirectDriver::memory_only())
+    }
+
+    /// Read a 4096-byte page directly into `target_page`.
+    #[inline]
+    pub fn read_page(
+        &mut self,
+        page_index: u64,
+        target_page: &mut TensorGraphPage,
+    ) -> Result<usize, AetherError> {
+        match self {
+            #[cfg(target_os = "linux")]
+            Self::Uring(_) => {
+                // When uring is configured for synchronous read fallback
+                Err(AetherError::IoFault { code: -1 })
+            }
+            Self::File(driver) => driver.read_page(page_index, target_page),
+        }
+    }
+
+    /// Write a 4096-byte page directly from `source_page`.
+    #[inline]
+    pub fn write_page(
+        &mut self,
+        page_index: u64,
+        source_page: &TensorGraphPage,
+    ) -> Result<usize, AetherError> {
+        match self {
+            #[cfg(target_os = "linux")]
+            Self::Uring(_) => Err(AetherError::IoFault { code: -1 }),
+            Self::File(driver) => driver.write_page(page_index, source_page),
+        }
+    }
+}
+
+impl Default for DirectPageIoDriver {
+    fn default() -> Self {
+        Self::memory_only()
     }
 }
 

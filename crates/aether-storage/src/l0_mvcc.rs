@@ -118,6 +118,14 @@ impl<const D: usize, const CAP: usize> L0MorphismLog<D, CAP> {
         product_log_map(config, base_state, commit_state, &mut velocity_delta)?;
 
         let slot = self.head % CAP;
+        let evicted_vertex_id = match self.entries.get(slot) {
+            Some(e) => e.vertex_id,
+            None => 0,
+        };
+        if evicted_vertex_id != 0 && evicted_vertex_id != vertex_id {
+            self.evict_hash_slot(evicted_vertex_id, slot as u32);
+        }
+
         let entry = match self.entries.get_mut(slot) {
             Some(e) => e,
             None => {
@@ -147,7 +155,7 @@ impl<const D: usize, const CAP: usize> L0MorphismLog<D, CAP> {
     /// Find the latest `TangentDeltaEntry` for a given `vertex_id`.
     ///
     /// # Hard Invariants
-    /// - Strictly 0 heap allocations on the hot path.
+    /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
     pub fn get_latest_entry(&self, vertex_id: u64) -> Option<&TangentDeltaEntry<D>> {
         let hash_cap = self.hash_buckets.len();
         if hash_cap == 0 {
@@ -167,7 +175,11 @@ impl<const D: usize, const CAP: usize> L0MorphismLog<D, CAP> {
 
             if slot.vertex_id == vertex_id {
                 let log_idx = slot.log_slot as usize;
-                return self.entries.get(log_idx);
+                let entry = self.entries.get(log_idx)?;
+                if entry.vertex_id != vertex_id {
+                    return None;
+                }
+                return Some(entry);
             }
         }
 
@@ -252,6 +264,71 @@ impl<const D: usize, const CAP: usize> L0MorphismLog<D, CAP> {
                 slot.occupied = true;
                 return;
             }
+        }
+    }
+
+    #[inline]
+    fn evict_hash_slot(&mut self, vertex_id: u64, target_log_slot: u32) {
+        let hash_cap = self.hash_buckets.len();
+        if hash_cap == 0 {
+            return;
+        }
+
+        let h = (xxhash_rust::xxh3::xxh3_64(&vertex_id.to_le_bytes()) as usize) % hash_cap;
+        let max_probes = hash_cap.min(64);
+        let mut found_pos = None;
+
+        for step in 0..max_probes {
+            let idx = (h + step) % hash_cap;
+            let slot = match self.hash_buckets.get(idx) {
+                Some(s) => s,
+                None => return,
+            };
+
+            if !slot.occupied {
+                return;
+            }
+
+            if slot.vertex_id == vertex_id && slot.log_slot == target_log_slot {
+                found_pos = Some(idx);
+                break;
+            }
+        }
+
+        let mut i = match found_pos {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Backward-shift deletion to preserve open-addressed collision chains without tombstones
+        let mut j = (i + 1) % hash_cap;
+        while let Some(slot_j) = self.hash_buckets.get(j) {
+            if !slot_j.occupied {
+                break;
+            }
+            let k =
+                (xxhash_rust::xxh3::xxh3_64(&slot_j.vertex_id.to_le_bytes()) as usize) % hash_cap;
+            let should_shift = if i <= j {
+                k <= i || k > j
+            } else {
+                k <= i && k > j
+            };
+            if should_shift {
+                let next_item = self.hash_buckets.get(j).copied();
+                if let (Some(item), Some(slot_i)) = (next_item, self.hash_buckets.get_mut(i)) {
+                    *slot_i = item;
+                    i = j;
+                }
+            }
+            j = (j + 1) % hash_cap;
+        }
+
+        if let Some(hole) = self.hash_buckets.get_mut(i) {
+            *hole = L0HashSlot {
+                vertex_id: 0,
+                log_slot: 0,
+                occupied: false,
+            };
         }
     }
 }

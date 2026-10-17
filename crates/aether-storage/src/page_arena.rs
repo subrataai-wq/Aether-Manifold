@@ -13,6 +13,7 @@ use bytemuck::Zeroable;
 pub struct AlignedPageArena {
     pages: Vec<TensorGraphPage>,
     free_slots: Vec<usize>,
+    allocated_bitmap: Vec<u64>,
     allocated_count: usize,
 }
 
@@ -25,10 +26,13 @@ impl AlignedPageArena {
         for i in (0..num_pages).rev() {
             free_slots.push(i);
         }
+        let bitmap_words = num_pages.div_ceil(64);
+        let allocated_bitmap = vec![0u64; bitmap_words];
 
         Self {
             pages,
             free_slots,
+            allocated_bitmap,
             allocated_count: 0,
         }
     }
@@ -87,29 +91,47 @@ impl AlignedPageArena {
         page.header.manifold_curvature_bits = curvature_bits;
         page.header.update_checksum();
 
+        let word = slot / 64;
+        let mask = 1u64 << (slot % 64);
+        if let Some(w) = self.allocated_bitmap.get_mut(word) {
+            *w |= mask;
+        }
+
         self.allocated_count += 1;
         Ok(slot)
     }
 
     /// Return a page slot back to the arena.
     ///
+    /// Validates that `slot` is currently allocated using `allocated_bitmap`
+    /// to prevent double-free and subsequent heap reallocations.
+    ///
     /// # Hard Invariants
-    /// - Strictly 0 heap allocations on the hot path.
+    /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
     pub fn deallocate_page(&mut self, slot: usize) -> Result<(), AetherError> {
         if slot >= self.pages.len() {
-            return Err(AetherError::OutOfBounds {
-                index: slot,
-                limit: self.pages.len(),
-            });
+            return Err(AetherError::InvalidPageSlot { slot });
+        }
+
+        let word = slot / 64;
+        let mask = 1u64 << (slot % 64);
+        let is_allocated = match self.allocated_bitmap.get(word) {
+            Some(&w) => (w & mask) != 0,
+            None => false,
+        };
+
+        if !is_allocated {
+            return Err(AetherError::InvalidPageSlot { slot });
+        }
+
+        if let Some(w) = self.allocated_bitmap.get_mut(word) {
+            *w &= !mask;
         }
 
         let page = match self.pages.get_mut(slot) {
             Some(p) => p,
             None => {
-                return Err(AetherError::OutOfBounds {
-                    index: slot,
-                    limit: self.pages.len(),
-                });
+                return Err(AetherError::InvalidPageSlot { slot });
             }
         };
 
@@ -117,6 +139,20 @@ impl AlignedPageArena {
         self.free_slots.push(slot);
         self.allocated_count = self.allocated_count.saturating_sub(1);
         Ok(())
+    }
+
+    /// Check if a page slot is currently allocated.
+    #[inline]
+    pub fn is_slot_allocated(&self, slot: usize) -> bool {
+        if slot >= self.pages.len() {
+            return false;
+        }
+        let word = slot / 64;
+        let mask = 1u64 << (slot % 64);
+        match self.allocated_bitmap.get(word) {
+            Some(&w) => (w & mask) != 0,
+            None => false,
+        }
     }
 
     /// Retrieve an immutable reference to an allocated page slot.

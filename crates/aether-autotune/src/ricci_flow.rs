@@ -131,6 +131,221 @@ impl RicciFlowOptimizer {
         Ok(results)
     }
 
+    /// Evaluates discrete Ollivier-Ricci curvatures across an edge list using Sinkhorn-Knopp
+    /// Optimal Transport between 1-hop neighborhood coordinate distributions on the manifold:
+    ///
+    /// $$\kappa_{\text{OR}}(u, v) = 1.0 - \frac{\mathcal{W}_1(m_u, m_v)}{d_{\mathcal{M}}(x_u, x_v)}$$
+    ///
+    /// Neighborhood measures $m_u$ and $m_v$ are formed over the closed 1-hop neighborhoods $N[u]$ and $N[v]$.
+    pub fn compute_ollivier_curvatures(
+        &self,
+        num_vertices: usize,
+        vertex_coords: &[f32],
+        coord_dim: usize,
+        edges: &[(usize, usize)],
+    ) -> Result<Vec<EdgeCurvature>, AetherError> {
+        let mut ws = vec![0.0f32; 32768];
+        let mut out = vec![EdgeCurvature::new(0, 0, 0.0, 0.0); edges.len()];
+        let count = self.compute_ollivier_curvatures_with_workspace(
+            num_vertices,
+            vertex_coords,
+            coord_dim,
+            edges,
+            &mut out,
+            &mut ws,
+        )?;
+        out.truncate(count);
+        Ok(out)
+    }
+
+    /// Zero-allocation hot-path variant of `compute_ollivier_curvatures` executing inside `HotPathAllocGuard`
+    /// (Rule 3.1 & Rule 3.4). Uses pre-allocated stack arrays and caller-provided `workspace` slice.
+    pub fn compute_ollivier_curvatures_with_workspace(
+        &self,
+        num_vertices: usize,
+        vertex_coords: &[f32],
+        coord_dim: usize,
+        edges: &[(usize, usize)],
+        out_curvatures: &mut [EdgeCurvature],
+        workspace: &mut [f32],
+    ) -> Result<usize, AetherError> {
+        if coord_dim == 0 {
+            return Err(AetherError::InvalidBufferSize {
+                actual: 0,
+                expected: 1,
+            });
+        }
+        if vertex_coords.len() < num_vertices * coord_dim {
+            return Err(AetherError::InvalidBufferSize {
+                actual: vertex_coords.len(),
+                expected: num_vertices * coord_dim,
+            });
+        }
+
+        let max_results = out_curvatures.len();
+        let mut count = 0usize;
+
+        let sinkhorn_config = aether_manifold::optimal_transport::SinkhornConfig {
+            epsilon: 0.1,
+            max_iter: 100,
+            tolerance: 1e-4,
+        };
+
+        for &(u, v) in edges {
+            if u >= num_vertices {
+                return Err(AetherError::OutOfBounds {
+                    index: u,
+                    limit: num_vertices,
+                });
+            }
+            if v >= num_vertices {
+                return Err(AetherError::OutOfBounds {
+                    index: v,
+                    limit: num_vertices,
+                });
+            }
+            if u == v {
+                continue;
+            }
+            if count >= max_results {
+                break;
+            }
+
+            // Gather closed 1-hop neighborhoods N[u] and N[v] on stack
+            let mut n_u = [0usize; 64];
+            if let Some(slot) = n_u.first_mut() {
+                *slot = u;
+            }
+            let mut count_u = 1usize;
+            for &(eu, ev) in edges {
+                let neighbor = if eu == u && ev != u {
+                    Some(ev)
+                } else if ev == u && eu != u {
+                    Some(eu)
+                } else {
+                    None
+                };
+                if let Some(nbr) = neighbor {
+                    if let Some(slice) = n_u.get(..count_u) {
+                        if !slice.contains(&nbr) {
+                            if let Some(slot) = n_u.get_mut(count_u) {
+                                *slot = nbr;
+                                count_u += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let mut n_v = [0usize; 64];
+            if let Some(slot) = n_v.first_mut() {
+                *slot = v;
+            }
+            let mut count_v = 1usize;
+            for &(eu, ev) in edges {
+                let neighbor = if eu == v && ev != v {
+                    Some(ev)
+                } else if ev == v && eu != v {
+                    Some(eu)
+                } else {
+                    None
+                };
+                if let Some(nbr) = neighbor {
+                    if let Some(slice) = n_v.get(..count_v) {
+                        if !slice.contains(&nbr) {
+                            if let Some(slot) = n_v.get_mut(count_v) {
+                                *slot = nbr;
+                                count_v += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let deg_u = count_u.saturating_sub(1);
+            let deg_v = count_v.saturating_sub(1);
+            let forman = 4.0 - (deg_u as f32) - (deg_v as f32);
+
+            let a_len = count_u * coord_dim;
+            let b_len = count_v * coord_dim;
+            let ot_req =
+                aether_manifold::optimal_transport::sinkhorn_workspace_size(count_u, count_v);
+            let total_req = a_len + b_len + ot_req;
+
+            if workspace.len() < total_req {
+                return Err(AetherError::ScratchpadExhausted {
+                    requested: total_req * core::mem::size_of::<f32>(),
+                    available: core::mem::size_of_val(workspace),
+                });
+            }
+
+            let (a_bag, rest) = workspace.split_at_mut(a_len);
+            let (b_bag, ot_ws) = rest.split_at_mut(b_len);
+
+            if let Some(u_slice) = n_u.get(..count_u) {
+                for (i, &idx) in u_slice.iter().enumerate() {
+                    if let (Some(dst), Some(src)) = (
+                        a_bag.get_mut(i * coord_dim..(i + 1) * coord_dim),
+                        vertex_coords.get(idx * coord_dim..(idx + 1) * coord_dim),
+                    ) {
+                        dst.copy_from_slice(src);
+                    }
+                }
+            }
+
+            if let Some(v_slice) = n_v.get(..count_v) {
+                for (j, &idx) in v_slice.iter().enumerate() {
+                    if let (Some(dst), Some(src)) = (
+                        b_bag.get_mut(j * coord_dim..(j + 1) * coord_dim),
+                        vertex_coords.get(idx * coord_dim..(idx + 1) * coord_dim),
+                    ) {
+                        dst.copy_from_slice(src);
+                    }
+                }
+            }
+
+            let u_slice = match vertex_coords.get(u * coord_dim..(u + 1) * coord_dim) {
+                Some(s) => s,
+                None => {
+                    return Err(AetherError::OutOfBounds {
+                        index: (u + 1) * coord_dim,
+                        limit: vertex_coords.len(),
+                    })
+                }
+            };
+            let v_slice = match vertex_coords.get(v * coord_dim..(v + 1) * coord_dim) {
+                Some(s) => s,
+                None => {
+                    return Err(AetherError::OutOfBounds {
+                        index: (v + 1) * coord_dim,
+                        limit: vertex_coords.len(),
+                    })
+                }
+            };
+            let d_sq = aether_manifold::simd::simd_euclidean_distance_squared(u_slice, v_slice);
+            let d_uv = libm::sqrtf(d_sq).max(1e-5);
+
+            let ot_res = aether_manifold::optimal_transport::sinkhorn_knopp_with_workspace(
+                a_bag,
+                count_u,
+                b_bag,
+                count_v,
+                coord_dim,
+                &sinkhorn_config,
+                ot_ws,
+            )?;
+            let w1 = libm::sqrtf(ot_res.cost.max(0.0));
+            let ollivier = 1.0 - (w1 / d_uv);
+
+            if let Some(slot) = out_curvatures.get_mut(count) {
+                *slot = EdgeCurvature::new(u, v, forman, ollivier);
+                count += 1;
+            }
+        }
+
+        Ok(count)
+    }
+
     /// Dynamically evolves product manifold curvatures (kappa, tau) based on discrete edge curvatures.
     ///
     /// - If tree-like negative curvature dominates: kappa shifts more negative to accommodate hierarchical branching.

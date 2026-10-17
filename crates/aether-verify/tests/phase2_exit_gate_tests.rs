@@ -15,8 +15,11 @@
 
 use std::time::Instant;
 
-use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard};
+use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard, TrackingAllocator};
 use aether_core::hlc::HlcTimestamp;
+
+#[global_allocator]
+static ALLOC: TrackingAllocator = TrackingAllocator::new(std::alloc::System);
 use aether_core::page::{PageHeader, TensorGraphPage};
 use aether_manifold::product::{
     product_manifold_distance, EuclideanSpec, HyperbolicSpec, ProductManifoldConfig, SphericalSpec,
@@ -68,7 +71,8 @@ fn gate_phase2_3hop_traversal_under_5ms_and_recall() {
                 lsn: HlcTimestamp::pack(1, 0),
                 page_id: 0,
                 manifold_curvature_bits: 0,
-                csr_offset_table: [0; 16],
+                csr_offset_table: [0; 15],
+                flags: 0,
             },
             at_rq_codebooks: [0; 256],
             neighbor_ids: [0; 64],
@@ -287,7 +291,8 @@ fn gate_phase2_zero_hot_path_heap_allocations() {
             lsn: HlcTimestamp::pack(1, 0),
             page_id: 1,
             manifold_curvature_bits: 0,
-            csr_offset_table: [0; 16],
+            csr_offset_table: [0; 15],
+            flags: 0,
         },
         at_rq_codebooks: [0; 256],
         neighbor_ids: {

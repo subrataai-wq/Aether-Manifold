@@ -13,6 +13,17 @@ use aether_core::page::TensorGraphPage;
 /// Capacity of the speculative prefetch queue.
 pub const PREFETCH_QUEUE_CAPACITY: usize = 64;
 
+/// Result report from speculative prefetch evaluation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PrefetchReport {
+    /// Number of candidate neighbor pages found in memory cache and hardware prefetched.
+    pub ram_cache_hits: usize,
+    /// Number of asynchronous direct I/O prefetch requests submitted to NVMe driver.
+    pub async_io_submissions: usize,
+    /// Number of duplicate page requests skipped because they are already queued.
+    pub duplicate_skips: usize,
+}
+
 /// Speculative Lookahead Prefetch Pipeline.
 pub struct SpeculativeLookaheadPipeline {
     /// Bounded circular buffer of prefetch target node IDs.
@@ -83,6 +94,73 @@ impl SpeculativeLookaheadPipeline {
         }
 
         Ok(prefetched_count)
+    }
+
+    /// Speculatively prefetch 1-hop neighbor pages, resolving in-memory cache hits via hardware
+    /// CPU prefetch instructions and enqueuing asynchronous direct I/O requests for disk-resident pages.
+    ///
+    /// # Invariants
+    /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
+    pub fn prefetch_neighbor_pages_with_io<F, I>(
+        &mut self,
+        page: &TensorGraphPage,
+        max_lookahead: usize,
+        page_lookup: F,
+        mut io_submit: I,
+    ) -> Result<PrefetchReport, AetherError>
+    where
+        F: Fn(u64) -> Option<*const TensorGraphPage>,
+        I: FnMut(u64) -> Result<(), AetherError>,
+    {
+        let limit = (page.header.active_vertex_count as usize)
+            .min(PREFETCH_QUEUE_CAPACITY)
+            .min(max_lookahead);
+
+        let mut report = PrefetchReport::default();
+
+        for i in 0..limit {
+            let neighbor_id = match page.neighbor_ids.get(i) {
+                Some(&id) if id != 0 => id,
+                _ => continue,
+            };
+
+            if let Some(page_ptr) = page_lookup(neighbor_id) {
+                Self::issue_hardware_prefetch(page_ptr);
+                report.ram_cache_hits += 1;
+            } else {
+                // Check deduplication in active prefetch queue
+                let mut already_queued = false;
+                for k in 0..self.count {
+                    let idx = (self.head + k) % PREFETCH_QUEUE_CAPACITY;
+                    if let Some(&queued_id) = self.prefetch_queue.get(idx) {
+                        if queued_id == neighbor_id {
+                            already_queued = true;
+                            break;
+                        }
+                    }
+                }
+
+                if already_queued {
+                    report.duplicate_skips += 1;
+                } else {
+                    // Record into deduplication ring buffer
+                    if let Some(slot) = self.prefetch_queue.get_mut(self.tail) {
+                        *slot = neighbor_id;
+                        self.tail = (self.tail + 1) % PREFETCH_QUEUE_CAPACITY;
+                        if self.count < PREFETCH_QUEUE_CAPACITY {
+                            self.count += 1;
+                        } else {
+                            self.head = (self.head + 1) % PREFETCH_QUEUE_CAPACITY;
+                        }
+                    }
+
+                    io_submit(neighbor_id)?;
+                    report.async_io_submissions += 1;
+                }
+            }
+        }
+
+        Ok(report)
     }
 
     /// Issue hardware CPU prefetch intrinsic on 4KB page memory addresses.

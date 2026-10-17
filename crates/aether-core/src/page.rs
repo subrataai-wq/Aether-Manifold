@@ -17,7 +17,8 @@ use crate::hlc::HlcTimestamp;
 /// - 08..16 (8B): LSN (Hybrid Logical Clock Timestamp)
 /// - 16..24 (8B): Physical Page Identifier
 /// - 24..32 (8B): Riemannian Manifold Curvature Parameters (packed bits)
-/// - 32..64 (32B): Intra-page CSR Offset Table (16 x u16)
+/// - 32..62 (30B): Intra-page CSR Offset Table (15 x u16)
+/// - 62..64 (2B): Page Control Flags (e.g. FP16 spillover active)
 #[repr(C, align(64))]
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable, FromBytes, IntoBytes, KnownLayout, Immutable,
@@ -33,9 +34,24 @@ pub struct PageHeader {
     pub page_id: u64,
     /// Curvature parameters for product manifold components (e.g. kappa, tau).
     pub manifold_curvature_bits: u64,
-    /// Compressed Sparse Row offset table for local intra-page adjacency list.
-    pub csr_offset_table: [u16; 16],
+    /// 30-byte intra-page Compressed Sparse Row (CSR) offset table (15 x u16).
+    ///
+    /// Stores the index boundary offsets into `neighbor_ids`, `quantized_neighbors`, and
+    /// `sheaf_edge_weights` when multiple small sub-entities / sub-vertices (up to 16) are
+    /// packed into a single 4KB `TensorGraphPage`.
+    ///
+    /// Memory Layout & Alignment:
+    /// - Occupies bytes 32..62 of `PageHeader`.
+    /// - Followed immediately by 2 bytes of `flags` (bytes 62..64).
+    /// - Preserves the exact 64-byte `PageHeader` footprint (`#[repr(C, align(64))]`)
+    ///   with strictly zero implicit compiler padding bytes.
+    pub csr_offset_table: [u16; 15],
+    /// Page control flags bitmask.
+    pub flags: u16,
 }
+
+/// Flag indicating that this page contains FP16 residual spillover in bytes 1184..1216.
+pub const PAGE_FLAG_HAS_FP16_SPILLOVER: u16 = 1 << 0;
 
 static_assertions::const_assert_eq!(core::mem::size_of::<PageHeader>(), 64);
 static_assertions::const_assert_eq!(core::mem::align_of::<PageHeader>(), 64);
@@ -239,4 +255,138 @@ impl TensorGraphPage {
             }
         }
     }
+
+    /// Write up to 16 high-curvature FP16 residual components into bytes 1184..1216 of `sheaf_edge_weights`
+    /// (u16 slots 592..608) and set `PAGE_FLAG_HAS_FP16_SPILLOVER` in header flags.
+    ///
+    /// # Invariants
+    /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
+    #[inline]
+    pub fn write_fp16_residual_spillover(&mut self, residual: &[f32]) {
+        let count = residual.len().min(16);
+        if let Some(target_bytes) = self.sheaf_edge_weights.get_mut(1184..1216) {
+            for i in 0..16 {
+                let bits = if i < count {
+                    f32_to_f16_bits(residual.get(i).copied().unwrap_or(0.0))
+                } else {
+                    0u16
+                };
+                let le = bits.to_le_bytes();
+                let offset = i * 2;
+                if let Some(slot) = target_bytes.get_mut(offset..offset + 2) {
+                    slot.copy_from_slice(&le);
+                }
+            }
+            self.header.flags |= PAGE_FLAG_HAS_FP16_SPILLOVER;
+            self.header.update_checksum();
+        }
+    }
+
+    /// Read up to 16 high-curvature FP16 residual components from bytes 1184..1216 of `sheaf_edge_weights`
+    /// into `out`.
+    ///
+    /// Returns `false` if `PAGE_FLAG_HAS_FP16_SPILLOVER` is not set; otherwise decodes and returns `true`.
+    ///
+    /// # Invariants
+    /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
+    #[inline]
+    pub fn read_fp16_residual_spillover(&self, out: &mut [f32; 16]) -> bool {
+        if (self.header.flags & PAGE_FLAG_HAS_FP16_SPILLOVER) == 0 {
+            return false;
+        }
+
+        if let Some(src_bytes) = self.sheaf_edge_weights.get(1184..1216) {
+            for i in 0..16 {
+                let offset = i * 2;
+                if let Some(b) = src_bytes.get(offset..offset + 2) {
+                    if let Ok(arr) = <[u8; 2]>::try_from(b) {
+                        let bits = u16::from_le_bytes(arr);
+                        if let Some(slot) = out.get_mut(i) {
+                            *slot = f16_bits_to_f32(bits);
+                        }
+                    }
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Convert an f32 into IEEE-754 binary16 (half-precision) bits.
+///
+/// Clamps overflow to finite max/min without generating unwanted NaNs,
+/// and handles zero, subnormals, and normal floats cleanly.
+#[inline]
+pub fn f32_to_f16_bits(val: f32) -> u16 {
+    let fbits = val.to_bits();
+    let sign = ((fbits >> 16) & 0x8000) as u16;
+    let exp = ((fbits >> 23) & 0xFF) as i32;
+    let frac = fbits & 0x007F_FFFF;
+
+    if exp == 0xFF {
+        if frac != 0 {
+            return sign | 0x7E00;
+        } else {
+            return sign | 0x7C00;
+        }
+    }
+
+    let new_exp = exp - 127 + 15;
+
+    if new_exp >= 31 {
+        // Clamp to max finite f16 (65504.0)
+        return sign | 0x7BFF;
+    }
+
+    if new_exp <= 0 {
+        if new_exp < -10 {
+            return sign;
+        }
+        let full_mantissa = frac | 0x0080_0000;
+        let shift = (14 - new_exp) as u32;
+        let sub_frac = (full_mantissa >> shift) as u16;
+        return sign | sub_frac;
+    }
+
+    let exp_bits = ((new_exp as u16) & 0x1F) << 10;
+    let frac_bits = ((frac >> 13) & 0x03FF) as u16;
+    sign | exp_bits | frac_bits
+}
+
+/// Convert IEEE-754 binary16 (half-precision) bits into an f32.
+#[inline]
+pub fn f16_bits_to_f32(bits: u16) -> f32 {
+    let sign = ((bits & 0x8000) as u32) << 16;
+    let exp = ((bits >> 10) & 0x1F) as u32;
+    let frac = (bits & 0x03FF) as u32;
+
+    if exp == 0 {
+        if frac == 0 {
+            return f32::from_bits(sign);
+        }
+        let mut f = frac;
+        let mut shift = 0;
+        while (f & 0x0400) == 0 {
+            f <<= 1;
+            shift += 1;
+        }
+        f &= 0x03FF;
+        let new_exp = (127 - 15 + 1 - shift) << 23;
+        let new_frac = f << 13;
+        return f32::from_bits(sign | new_exp | new_frac);
+    }
+
+    if exp == 31 {
+        if frac != 0 {
+            return f32::from_bits(sign | 0x7F80_0000 | (frac << 13));
+        } else {
+            return f32::from_bits(sign | 0x7F80_0000);
+        }
+    }
+
+    let new_exp = (exp + 112) << 23;
+    let new_frac = frac << 13;
+    f32::from_bits(sign | new_exp | new_frac)
 }

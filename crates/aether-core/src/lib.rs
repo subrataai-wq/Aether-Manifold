@@ -17,5 +17,7 @@ pub use alloc_guard::{
 };
 pub use error::AetherError;
 pub use hlc::{HlcClock, HlcTimestamp};
-pub use page::{PageHeader, TensorGraphPage};
+pub use page::{
+    f16_bits_to_f32, f32_to_f16_bits, PageHeader, TensorGraphPage, PAGE_FLAG_HAS_FP16_SPILLOVER,
+};
 pub use scratchpad::Scratchpad;

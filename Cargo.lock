@@ -62,11 +62,9 @@ name = "aether-query"
 version = "0.1.0"
 dependencies = [
  "aether-core",
- "aether-manifold",
  "dyn-stack",
  "half",
  "libm",
- "pulp",
  "static_assertions",
 ]
 
@@ -79,6 +77,7 @@ dependencies = [
  "bytemuck",
  "crc32fast",
  "io-uring",
+ "libc",
  "static_assertions",
  "xxhash-rust",
 ]
@@ -98,6 +97,19 @@ dependencies = [
  "oorandom",
  "proptest",
  "static_assertions",
+]
+
+[[package]]
+name = "aetherd"
+version = "0.1.0"
+dependencies = [
+ "aether-autotune",
+ "aether-consensus",
+ "aether-core",
+ "aether-manifold",
+ "aether-query",
+ "aether-storage",
+ "bytemuck",
 ]
 
 [[package]]

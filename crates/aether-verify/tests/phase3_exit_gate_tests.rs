@@ -21,7 +21,10 @@ use aether_consensus::consensus::{
 };
 use aether_consensus::morphism_replicator::{CommittedLogRecord, MorphismReplicator};
 use aether_consensus::rdma_fabric::{RdmaFabric, RdmaMemoryWindow};
-use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard};
+use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard, TrackingAllocator};
+
+#[global_allocator]
+static ALLOC: TrackingAllocator = TrackingAllocator::new(std::alloc::System);
 
 /// Step 3.4 Exit Gate 1: 64-node distributed cluster simulation.
 ///

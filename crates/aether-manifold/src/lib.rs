@@ -26,7 +26,8 @@ pub mod tangent;
 pub use at_rq::{
     anisotropic_residual_loss, at_rq_build_query_lut, at_rq_decode_neighbor, at_rq_encode_neighbor,
     at_rq_pad_1024d_to_1032d, at_rq_score_page_neighbors,
-    curvature_corrected_tangent_distance_squared, CompactNeighborCode,
+    curvature_corrected_tangent_distance_squared, AnisotropicTangentQuantizer, CompactNeighborCode,
+    DistortionCertificate,
 };
 
 pub use tangent::{

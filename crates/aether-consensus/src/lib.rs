@@ -17,10 +17,10 @@ pub mod rdma_fabric;
 
 pub use consensus::{
     LeaderlessQuorumEngine, QuorumConfig, ReplicationMessage, ReplicationMessageType,
-    ReplicationRingBuffer, MAX_IN_FLIGHT_PROPOSALS,
+    ReplicationRingBuffer, MAX_CLUSTER_NODES, MAX_IN_FLIGHT_PROPOSALS,
 };
 pub use morphism_replicator::{
     CommittedLogRecord, MorphismReplicator, MAX_TRACKED_VERTICES, REPLICATOR_LOG_CAPACITY,
 };
 pub use partitioner::{GraphEdge, PartitionPlan, PartitionerConfig, SpectralGeodesicPartitioner};
-pub use rdma_fabric::{RdmaFabric, RdmaMemoryWindow, MAX_RDMA_NODES};
+pub use rdma_fabric::{RdmaFabric, RdmaMemoryWindow, RdmaTransportBackend, MAX_RDMA_NODES};

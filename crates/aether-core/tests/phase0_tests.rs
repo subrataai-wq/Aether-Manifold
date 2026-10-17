@@ -49,6 +49,7 @@ fn proof_tensor_page_layout_invariants() {
         24
     );
     assert_eq!(core::mem::offset_of!(PageHeader, csr_offset_table), 32);
+    assert_eq!(core::mem::offset_of!(PageHeader, flags), 62);
 
     // TensorGraphPage field offsets per roadmap.md Section 3.2
     assert_eq!(core::mem::offset_of!(TensorGraphPage, header), 0);

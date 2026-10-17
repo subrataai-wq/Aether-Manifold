@@ -8,6 +8,7 @@ members = [
     "crates/aether-consensus",
     "crates/aether-autotune",
     "crates/aether-verify",
+    "crates/aether-daemon",
 ]
 
 [workspace.package]
@@ -23,7 +24,6 @@ bytemuck = { version = "1.21", features = ["derive", "min_const_generics"] }
 static_assertions = "1.1"
 
 pulp = { version = "0.21", default-features = false }
-faer-core = { package = "faer", version = "0.24", default-features = false }
 dyn-stack = { version = "0.10", default-features = false }
 half = { version = "2.4", default-features = false, features = ["bytemuck", "zerocopy"] }
 libm = "0.2"
@@ -32,9 +32,6 @@ libm = "0.2"
 io-uring = "0.7"
 crc32fast = { version = "1.4", default-features = false }
 xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
-
-# Concurrency & Pre-allocated Arenas (Rule 3.1, 3.2)
-bumpalo = { version = "3.16", features = ["collections"] }
 
 # Error primitives
 thiserror = { version = "2.0", default-features = false }

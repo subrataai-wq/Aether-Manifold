@@ -15,8 +15,11 @@
 
 use std::time::Instant;
 
-use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard};
+use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard, TrackingAllocator};
 use aether_core::hlc::HlcTimestamp;
+
+#[global_allocator]
+static ALLOC: TrackingAllocator = TrackingAllocator::new(std::alloc::System);
 use aether_manifold::at_rq::{
     at_rq_build_query_lut, at_rq_encode_neighbor, at_rq_score_page_neighbors, CompactNeighborCode,
 };

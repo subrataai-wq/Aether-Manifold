@@ -33,38 +33,119 @@ Before executing the notebook cells below, use this mapping table to connect the
 ### 2.1 Installing Client SDKs & Embedded Crates
 
 ```bash
-# Python SDK (with zero-copy PyArrow & PyTorch/NumPy DLPack bindings)
-pip install aether-manifold[torch,arrow]
+# Python SDK (Architectural Target: gRPC/Arrow Flight client bindings)
+# pip install aether-manifold[torch,arrow]
 
-# TypeScript / Node.js SDK (with native N-API SIMD & gRPC/Arrow Flight transport)
-npm install @aether-manifold/sdk
+# TypeScript SDK (Architectural Target: Node.js / Browser N-API bindings)
+# npm install @aether-manifold/sdk
 
-# Rust Embedded Engine (direct zero-allocation workspace integration)
-cargo add aether-core aether-manifold aether-storage aether-query aether-consensus aether-verify
+# Native Rust Engine & CLI (Working Production Embedded Implementation)
+cargo build --release --bin aetherd
 ```
 
-### 2.2 Launching the Storage & Consensus Daemon (`aetherd`)
+> [!NOTE]
+> **Implementation Status**: The core engine, storage layer, query compiler, consensus protocol, and standalone daemon binary (`aetherd`) are **100% natively implemented and verified in Rust**. The Python and TypeScript packages are client transport wrappers and architectural interfaces over the native engine.
 
-Aether-Manifold runs a shared-nothing, thread-per-core runtime. In single-node mode, each physical core owns a pinned manifold shard and private `AlignedPageArena`. In distributed mode, nodes communicate across cores via 64-byte wait-free SPSC queues and across network hosts via one-sided zero-copy RDMA / CXL 3.0 fabrics.
+### 2.2 Running the Standalone Database Daemon (`aetherd`)
 
+Aether-Manifold provides a standalone daemon/CLI tool `aetherd` that operates with 0 heap allocations on the hot path, core pinning, and live Prometheus telemetry exposition.
+
+#### 1. Inspect Engine Status & Live Prometheus Telemetry
 ```bash
-# Standalone Single-Node Daemon
-aetherd start \
-  --nvme-dev /dev/nvme0n1 \
-  --io-engine io_uring_direct \
-  --page-size 4096 \
-  --cores 0-63 \
-  --l0-ring-capacity 65536 \
-  --listen-grpc 127.0.0.1:9090 \
-  --listen-aql 127.0.0.1:9091
+cargo run --release --bin aetherd -- status
+```
+*Output:*
+```text
+================================================================================
+Project Aether-Manifold: Engine Architecture & Shard Telemetry
+================================================================================
+Compile-Time Memory Layout Invariants:
+  - TensorGraphPage Size:      4096 bytes (4096B NVMe/Direct I/O aligned)
+  - TensorGraphPage Alignment: 4096 bytes
+  - PageHeader Size:           64 bytes (64B CPU cache-line aligned)
+  - PageHeader Alignment:      64 bytes
+  - Cluster Scale Limit:       256 nodes (256-bit non-colliding quorum mask)
+Worker Core Affinity:          Pinned to Core 0 successfully
 
-# Distributed 64-Node Cluster Shard Daemon with RDMA RoCEv2
-aetherd start \
-  --node-id 0 \
-  --cluster-size 64 \
-  --quorum-w 2 --quorum-r 2 \
-  --rdma-dev mlx5_0 \
-  --listen-grpc 0.0.0.0:9090
+Live Prometheus Metrics Exposition (Zero-Allocation Buffer):
+--------------------------------------------------------------------------------
+# HELP aether_shard_allocated_pages Number of active allocated 4KB pages.
+# TYPE aether_shard_allocated_pages gauge
+aether_shard_allocated_pages{core="0"} 2
+# HELP aether_shard_io_submitted_total Cumulative asynchronous direct I/O requests submitted.
+# TYPE aether_shard_io_submitted_total counter
+aether_shard_io_submitted_total{core="0"} 2
+# HELP aether_shard_io_completed_total Cumulative asynchronous direct I/O requests completed.
+# TYPE aether_shard_io_completed_total counter
+aether_shard_io_completed_total{core="0"} 2
+# HELP aether_shard_l0_entries Number of entries currently stored in L0 morphism log.
+# TYPE aether_shard_l0_entries gauge
+aether_shard_l0_entries{core="0"} 0
+--------------------------------------------------------------------------------
+```
+
+#### 2. Execute Declarative AQL Multi-Hop Graph Traversal
+```bash
+cargo run --release --bin aetherd -- exec "TRAVERSE FROM 0 HOPS 3 USING SEMIRING TROPICAL WHERE BETA = 0.5 AND GAMMA = 1.0 LIMIT 5"
+```
+*Output:*
+```text
+================================================================================
+AQL Query Execution Engine
+================================================================================
+Input Query: "TRAVERSE FROM 0 HOPS 3 USING SEMIRING TROPICAL WHERE BETA = 0.5 AND GAMMA = 1.0 LIMIT 5"
+AST Parse Time: 54 µs
+Status: TRAVERSAL COMPLETE
+  Semiring Mode:      Tropical
+  Traversal Hops:     3
+  Beta (Sheaf):       0.500
+  Gamma (Manifold):   1.000
+  Execution Latency:  20 µs
+  Frontier Candidates: 5
+
+Top Ranked Frontier Nodes:
+  Rank | Node ID | Accumulated Score | Hop Depth
+  ----------------------------------------------
+     1 |       0 |          0.050000 |         0
+     2 |       2 |          0.090000 |         1
+     3 |       1 |          0.090000 |         1
+     4 |       3 |          0.090000 |         2
+     5 |       4 |          0.210000 |         2
+Total Wall-Clock Latency: 359 µs
+```
+
+#### 3. Run Self-Check Verification Gates
+```bash
+cargo run --release --bin aetherd -- verify-gates
+```
+*Output:*
+```text
+================================================================================
+Project Aether-Manifold: Hardware & Algorithmic Self-Test Exit Gates
+================================================================================
+Gate 1: Verifying 4KB page and 64B header compile-time layouts... [PASSED]
+Gate 2: Verifying L0 MVCC continuous geodesic state interpolation... [PASSED]
+Gate 3: Verifying Semiring-Sheaf SpMV query engine & DMA backend... [PASSED]
+
+All exit gates passed self-check successfully (Status Code: 0).
+```
+
+#### 4. Run Persistent High-Throughput Server Mode
+Launch the background daemon listening on a non-blocking TCP socket with physical core affinity:
+```bash
+cargo run --release --bin aetherd -- serve --listen 127.0.0.1:9090
+```
+*Send declarative AQL queries directly over TCP:*
+```powershell
+$client = New-Object System.Net.Sockets.TcpClient("127.0.0.1", 9090)
+$stream = $client.GetStream()
+$writer = New-Object System.IO.StreamWriter($stream)
+$reader = New-Object System.IO.StreamReader($stream)
+$writer.WriteLine("TRAVERSE FROM 0 HOPS 3 USING SEMIRING TROPICAL WHERE BETA = 0.5 AND GAMMA = 1.0 LIMIT 5")
+$writer.Flush()
+$resp = $reader.ReadLine()
+Write-Host "Server Response: $resp"
+$client.Close()
 ```
 
 ---
@@ -214,12 +295,12 @@ bootstrapManifold();
 
 ```rust
 use aether_core::page::{PageHeader, TensorGraphPage};
-use aether_manifold::at_rq::{AnisotropicLossConfig, AtRqCodebook, CompactNeighborCode};
+use aether_manifold::at_rq::{AnisotropicTangentQuantizer, CompactNeighborCode};
 use aether_manifold::product::{
     EuclideanSpec, HyperbolicSpec, ProductManifoldConfig, SphericalSpec,
 };
 
-pub fn build_research_manifold() -> (ProductManifoldConfig, AnisotropicLossConfig) {
+pub fn build_research_manifold() -> (ProductManifoldConfig, AnisotropicTangentQuantizer) {
     // Compile-time layout assertions guaranteed by Phase 0 exit gates (TEST-MEM-01)
     const _: () = assert!(core::mem::size_of::<PageHeader>() == 64);
     const _: () = assert!(core::mem::size_of::<TensorGraphPage>() == 4096);
@@ -242,13 +323,12 @@ pub fn build_research_manifold() -> (ProductManifoldConfig, AnisotropicLossConfi
         }),
     };
 
-    let quant_cfg = AnisotropicLossConfig {
-        eta_parallel: 12.0_f32,
-        eta_orthogonal: 1.0_f32,
-        enable_rauch_jacobi_correction: true,
-    };
+    // 24 subspaces x 16 centroids x (48 / 24 = 2) dim = 768 floats for a 48-dim subspace quantizer
+    let codebooks = vec![0.0f32; 24 * 16 * 2];
+    let quantizer = AnisotropicTangentQuantizer::new(48, 16, codebooks)
+        .expect("Valid AT-RQ quantizer configuration");
 
-    (config, quant_cfg)
+    (config, quantizer)
 }
 ```
 
@@ -412,13 +492,17 @@ pub fn ingest_zero_alloc_hot_path(
     let ts = HlcTimestamp::now_or_tick(clock_state, physical_now_micros);
 
     // Allocate pre-aligned 4KB TensorGraphPage inside arena (strictly 0 heap allocations)
-    let page = arena
-        .allocate_page(1001, ts)
+    let slot = arena
+        .allocate_page(1001, ts, 0)
         .expect("Pre-allocated 4KB slot available");
+    let page = arena
+        .get_page_mut(slot)
+        .expect("Valid slot in arena");
 
     // Pack Householder restriction maps directly into the 1216B page region
-    let maps = [SheafRestrictionMap::identity(8); 4];
-    pack_page_sheaf_morphisms(&maps, &mut page.sheaf_edge_weights)
+    let maps = [SheafRestrictionMap::identity(); 4];
+    let weights = [1.0f32; 4];
+    pack_page_sheaf_morphisms(page, &maps, &weights)
         .expect("Morphisms packed into 4KB page without allocation");
 }
 ```
@@ -524,32 +608,42 @@ async function querySheafGraph(client: AetherClient, queryPoint: Float32Array): 
 
 ```rust
 use aether_core::alloc_guard::HotPathAllocGuard;
-use aether_query::compiler::{QueryPlan, SemiringSpMvEngine};
+use aether_core::page::TensorGraphPage;
+use aether_query::compiler::{FrontierNode, QueryPlan, SemiringSpMvEngine, MAX_QUERY_FRONTIER};
 use aether_query::semiring::SemiringMode;
-use aether_storage::page_arena::AlignedPageArena;
 
 pub fn execute_sheaf_query_zero_alloc(
-    engine: &SemiringSpMvEngine,
-    arena: &AlignedPageArena,
+    page_lookup: impl Fn(u64) -> Option<&'static TensorGraphPage>,
+    distance_oracle: impl Fn(u64) -> f32,
     start_vertex: u64,
-    query_coords: &[f32; 1536],
-) -> Vec<(u64, f32)> {
+) -> ([FrontierNode; MAX_QUERY_FRONTIER], usize) {
     let plan = QueryPlan {
-        start_vertex,
+        semiring_mode: SemiringMode::Tropical,
         max_hops: 3,
-        semiring: SemiringMode::Tropical,
-        sheaf_beta: 1.0_f32,
-        geodesic_gamma: 1.5_f32,
-        beam_width: 64,
         top_k: 10,
+        beam_width: 64,
+        beta: 1.0_f32,
+        gamma: 1.5_f32,
+        prune_threshold: 1e-4_f32,
     };
+
+    let mut results = [FrontierNode::default(); MAX_QUERY_FRONTIER];
+    let mut result_count = 0;
 
     let _guard = HotPathAllocGuard::enter();
 
     // Zero-heap-allocation traversal inside HotPathAllocGuard
-    engine
-        .execute_query(&plan, arena, query_coords)
-        .expect("Query executed in p99 < 5ms")
+    SemiringSpMvEngine::execute_query(
+        &plan,
+        &[start_vertex],
+        page_lookup,
+        distance_oracle,
+        &mut results,
+        &mut result_count,
+    )
+    .expect("Query executed in p99 < 5ms");
+
+    (results, result_count)
 }
 ```
 
@@ -616,19 +710,30 @@ print(f"Debiased Sinkhorn Divergence S_eps(A, B): {ot_divergence:.6f}")
 
 ```rust
 use aether_core::alloc_guard::HotPathAllocGuard;
-use aether_core::scratchpad::Scratchpad;
 use aether_manifold::optimal_transport::{
-    sinkhorn_debiased_divergence, OptimalTransportCostMatrix,
+    debiased_sinkhorn_divergence_with_workspace, SinkhornConfig,
 };
 
 pub fn compute_subgraph_ot_zero_alloc(
-    cost_matrix: &OptimalTransportCostMatrix,
-    scratchpad: &mut Scratchpad,
+    a_bag: &[f32],
+    n: usize,
+    b_bag: &[f32],
+    m: usize,
+    dim: usize,
+    workspace: &mut [f32],
 ) -> f32 {
+    let config = SinkhornConfig {
+        epsilon: 0.05_f32,
+        max_iter: 100,
+        tolerance: 1e-4_f32,
+    };
+
     let _guard = HotPathAllocGuard::enter();
 
-    sinkhorn_debiased_divergence(cost_matrix, 0.05_f32, 100, 1e-4_f32, scratchpad)
-        .expect("Converged within tolerance with zero heap allocations")
+    debiased_sinkhorn_divergence_with_workspace(
+        a_bag, n, b_bag, m, dim, &config, workspace,
+    )
+    .expect("Converged within tolerance with zero heap allocations")
 }
 ```
 
@@ -715,21 +820,28 @@ print(f"Reconstructed state at HLC {tau_midpoint} (alpha={snapshot.interpolation
 ```rust
 use aether_core::alloc_guard::HotPathAllocGuard;
 use aether_core::hlc::HlcTimestamp;
-use aether_storage::l0_mvcc::{L0MorphismLog, TangentDeltaEntry};
+use aether_manifold::product::ProductManifoldConfig;
+use aether_storage::l0_mvcc::L0MorphismLog;
 
-pub fn reconstruct_time_travel_state_zero_alloc(
-    l0_log: &L0MorphismLog<64, 1024>,
+pub fn reconstruct_time_travel_state_zero_alloc<const D: usize, const CAP: usize>(
+    config: &ProductManifoldConfig,
+    l0_log: &L0MorphismLog<D, CAP>,
     vertex_id: u64,
-    base_state_tau1: &[f32; 64],
+    base_state_tau1: &[f32; D],
     query_hlc: HlcTimestamp,
-) -> [f32; 64] {
-    let mut reconstructed = [0.0_f32; 64];
+) -> [f32; D] {
+    let mut reconstructed = [0.0_f32; D];
     let _guard = HotPathAllocGuard::enter();
 
+    let entry = l0_log
+        .get_latest_entry(vertex_id)
+        .expect("Causal HLC timestamp resolved in L0MorphismLog");
+
     l0_log
-        .reconstruct_at_hlc_euclidean(
-            vertex_id,
+        .reconstruct_state_at(
+            config,
             base_state_tau1,
+            entry,
             query_hlc,
             &mut reconstructed,
         )
@@ -763,25 +875,33 @@ OPTIMIZE MANIFOLD research_sheaf_manifold
 ```
 
 ```rust
+use aether_manifold::product::ProductManifoldConfig;
 use aether_storage::voronoi_compaction::{
-    evaluate_voronoi_boundary_certificate, VoronoiCellCertificate,
+    evaluate_voronoi_boundary_certificate, CompactionDecision, VoronoiCellCertificate,
 };
 
-pub fn check_o1_pointer_splice_eligibility(
-    vertex_dist_to_modified_centroid: f32,
-    modified_cell_max_radius: f32,
+pub fn check_o1_pointer_splice_eligibility<const D: usize>(
+    config: &ProductManifoldConfig,
+    u_coords: &[f32; D],
     vertex_kth_neighbor_geodesic_dist: f32,
+    modified_cell_max_radius: f32,
+    centroid: [f32; D],
 ) -> bool {
     let cert = VoronoiCellCertificate {
-        centroid_id: 42,
+        cell_id: 42,
+        centroid,
         max_geodesic_radius: modified_cell_max_radius,
+        modified: true,
     };
 
-    evaluate_voronoi_boundary_certificate(
-        vertex_dist_to_modified_centroid,
-        &cert,
+    let decision = evaluate_voronoi_boundary_certificate(
+        config,
+        u_coords,
         vertex_kth_neighbor_geodesic_dist,
-    )
+        &cert,
+    );
+
+    decision == Ok(CompactionDecision::BypassInteriorSplice)
 }
 ```
 

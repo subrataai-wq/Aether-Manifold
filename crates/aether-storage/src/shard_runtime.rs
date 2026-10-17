@@ -41,14 +41,16 @@ pub struct IoCompletionCqe {
 /// Shared-Nothing Thread-Per-Core Runtime Shard.
 ///
 /// Contains private memory, arena, clock, and lock-free I/O queue pair.
-pub struct CoreShardRuntime<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize> {
+pub struct CoreShardRuntime<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize = 64> {
     pub core_id: usize,
     pub clock: HlcClock,
     pub arena: AlignedPageArena,
     pub l0_log: L0MorphismLog<D, L0_CAP>,
     pub sq: SpscRingBuffer<IoSubmissionSqe, IO_DEPTH>,
     pub cq: SpscRingBuffer<IoCompletionCqe, IO_DEPTH>,
-    pub io_driver: crate::io_driver::FileDirectDriver,
+    pub io_driver: crate::io_driver::DirectPageIoDriver,
+    pub total_io_submitted: core::sync::atomic::AtomicUsize,
+    pub total_io_completed: core::sync::atomic::AtomicUsize,
 }
 
 impl<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize>
@@ -63,8 +65,16 @@ impl<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize>
             l0_log: L0MorphismLog::new(),
             sq: SpscRingBuffer::new(),
             cq: SpscRingBuffer::new(),
-            io_driver: crate::io_driver::FileDirectDriver::memory_only(),
+            io_driver: crate::io_driver::DirectPageIoDriver::memory_only(),
+            total_io_submitted: core::sync::atomic::AtomicUsize::new(0),
+            total_io_completed: core::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// Set an explicit physical page I/O driver (e.g. Linux io_uring or physical block driver).
+    pub fn with_driver(mut self, driver: crate::io_driver::DirectPageIoDriver) -> Self {
+        self.io_driver = driver;
+        self
     }
 
     /// Submit a speculative 4KB page prefetch / read request to the lock-free submission queue.
@@ -79,13 +89,16 @@ impl<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize>
             arena_slot,
             user_data: page_id,
         };
-        self.sq.try_push(sqe)
+        self.sq.try_push(sqe)?;
+        self.total_io_submitted
+            .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        Ok(())
     }
 
     /// Submit an asynchronous 4KB page write request to the lock-free submission queue.
     ///
     /// # Hard Invariants
-    /// - Strictly 0 heap allocations on the hot path.
+    /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
     #[inline]
     pub fn submit_page_write(&self, page_id: u64, arena_slot: usize) -> Result<(), AetherError> {
         let sqe = IoSubmissionSqe {
@@ -94,7 +107,10 @@ impl<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize>
             arena_slot,
             user_data: page_id,
         };
-        self.sq.try_push(sqe)
+        self.sq.try_push(sqe)?;
+        self.total_io_submitted
+            .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        Ok(())
     }
 
     /// Poll completed direct page I/O completions into `out_cqes`.
@@ -160,9 +176,169 @@ impl<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize>
             };
 
             let _ = self.cq.try_push(cqe);
+            self.total_io_completed
+                .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
             processed += 1;
         }
 
         processed
+    }
+
+    /// Capture a point-in-time telemetry snapshot of this shard runtime.
+    #[inline]
+    pub fn telemetry_snapshot(&self) -> ShardTelemetrySnapshot {
+        ShardTelemetrySnapshot {
+            core_id: self.core_id,
+            allocated_pages: self.arena.allocated_count(),
+            free_pages: self.arena.free_count(),
+            io_submitted_total: self
+                .total_io_submitted
+                .load(core::sync::atomic::Ordering::Relaxed),
+            io_completed_total: self
+                .total_io_completed
+                .load(core::sync::atomic::Ordering::Relaxed),
+            l0_entries: self.l0_log.len(),
+        }
+    }
+
+    /// Export Prometheus text-format metrics into a pre-allocated buffer with 0 heap allocations.
+    ///
+    /// Returns the number of bytes written into `out_buf`.
+    ///
+    /// # Hard Invariants
+    /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
+    #[inline]
+    pub fn export_prometheus_text(&self, out_buf: &mut [u8]) -> usize {
+        self.telemetry_snapshot().export_prometheus_text(out_buf)
+    }
+}
+
+/// Point-in-time telemetry snapshot for a core shard runtime.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShardTelemetrySnapshot {
+    pub core_id: usize,
+    pub allocated_pages: usize,
+    pub free_pages: usize,
+    pub io_submitted_total: usize,
+    pub io_completed_total: usize,
+    pub l0_entries: usize,
+}
+
+impl ShardTelemetrySnapshot {
+    /// Format Prometheus metrics into a pre-allocated byte buffer with 0 heap allocations.
+    ///
+    /// Returns the number of bytes written.
+    pub fn export_prometheus_text(&self, out_buf: &mut [u8]) -> usize {
+        use core::fmt::Write;
+        let mut writer = BufferWriter::new(out_buf);
+        let _ = writeln!(
+            writer,
+            "# HELP aether_shard_allocated_pages Number of active allocated 4KB pages.\n\
+             # TYPE aether_shard_allocated_pages gauge\n\
+             aether_shard_allocated_pages{{core=\"{}\"}} {}\n\
+             # HELP aether_shard_io_submitted_total Cumulative asynchronous direct I/O requests submitted.\n\
+             # TYPE aether_shard_io_submitted_total counter\n\
+             aether_shard_io_submitted_total{{core=\"{}\"}} {}\n\
+             # HELP aether_shard_io_completed_total Cumulative asynchronous direct I/O requests completed.\n\
+             # TYPE aether_shard_io_completed_total counter\n\
+             aether_shard_io_completed_total{{core=\"{}\"}} {}\n\
+             # HELP aether_shard_l0_entries Number of entries currently stored in L0 morphism log.\n\
+             # TYPE aether_shard_l0_entries gauge\n\
+             aether_shard_l0_entries{{core=\"{}\"}} {}",
+            self.core_id,
+            self.allocated_pages,
+            self.core_id,
+            self.io_submitted_total,
+            self.core_id,
+            self.io_completed_total,
+            self.core_id,
+            self.l0_entries
+        );
+        writer.written()
+    }
+}
+
+/// Stack-allocated zero-heap formatting sink for Prometheus telemetry.
+struct BufferWriter<'a> {
+    buf: &'a mut [u8],
+    offset: usize,
+}
+
+impl<'a> BufferWriter<'a> {
+    #[inline]
+    fn new(buf: &'a mut [u8]) -> Self {
+        Self { buf, offset: 0 }
+    }
+
+    #[inline]
+    fn written(&self) -> usize {
+        self.offset
+    }
+}
+
+impl core::fmt::Write for BufferWriter<'_> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let bytes = s.as_bytes();
+        let remaining = self.buf.len().saturating_sub(self.offset);
+        let to_copy = bytes.len().min(remaining);
+        if let (Some(src), Some(dest)) = (
+            bytes.get(..to_copy),
+            self.buf.get_mut(self.offset..self.offset + to_copy),
+        ) {
+            dest.copy_from_slice(src);
+            self.offset += to_copy;
+        }
+        if to_copy < bytes.len() {
+            Err(core::fmt::Error)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Pin the calling OS thread to a specific hardware CPU core.
+///
+/// Guaranteed zero heap allocations on the hot path.
+///
+/// # Hard Invariants
+/// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
+#[inline]
+pub fn pin_current_thread_to_core(core_id: usize) -> Result<(), AetherError> {
+    #[cfg(target_os = "linux")]
+    {
+        unsafe {
+            let mut cpuset: libc::cpu_set_t = core::mem::zeroed();
+            libc::CPU_ZERO(&mut cpuset);
+            libc::CPU_SET(core_id % 1024, &mut cpuset);
+            let ret = libc::sched_setaffinity(0, core::mem::size_of::<libc::cpu_set_t>(), &cpuset);
+            if ret == 0 {
+                Ok(())
+            } else {
+                Err(AetherError::IoFault { code: ret })
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        extern "system" {
+            fn GetCurrentThread() -> isize;
+            fn SetThreadAffinityMask(hThread: isize, dwThreadAffinityMask: usize) -> usize;
+        }
+        unsafe {
+            let mask = 1usize << (core_id % 64);
+            let prev = SetThreadAffinityMask(GetCurrentThread(), mask);
+            if prev != 0 {
+                Ok(())
+            } else {
+                Err(AetherError::IoFault { code: 1 })
+            }
+        }
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        let _ = core_id;
+        Ok(())
     }
 }

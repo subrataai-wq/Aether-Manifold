@@ -112,4 +112,32 @@ pub enum AetherError {
         /// Specific reason code or synthetic fault tag.
         reason_code: u32,
     },
+
+    /// Invalid or unallocated page slot referenced.
+    #[error("Invalid page slot: slot {slot} is not allocated")]
+    InvalidPageSlot {
+        /// Attempted slot index.
+        slot: usize,
+    },
+
+    /// Capacity exhausted in bounded storage structure.
+    #[error("Capacity exhausted: current capacity {capacity} reached")]
+    CapacityExhausted {
+        /// Capacity limit.
+        capacity: usize,
+    },
+
+    /// Invalid node identifier.
+    #[error("Invalid node ID: {node_id}")]
+    InvalidNodeId {
+        /// Target node identifier.
+        node_id: u64,
+    },
+
+    /// Query parse error.
+    #[error("Query parse error: code {code}")]
+    QueryParseError {
+        /// Error code representing parse failure.
+        code: u32,
+    },
 }

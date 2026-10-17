@@ -11,6 +11,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![warn(missing_docs)]
 
+pub mod aql;
 pub mod compiler;
 pub mod dirichlet;
 pub mod laplacian;
@@ -19,6 +20,7 @@ pub mod sheaf;
 pub mod speculative_prefetch;
 
 // Re-exports for convenient high-level usage
+pub use aql::{parse_aql, AqlCompileHelper, AqlStatement, SemiringKind};
 pub use compiler::{FrontierNode, QueryPlan, SemiringSpMvEngine, MAX_QUERY_FRONTIER};
 pub use dirichlet::{ClusterEdgeDescriptor, DirichletSolverConfig, SheafDirichletSolver};
 pub use laplacian::{BlockSheafLaplacian, SheafCoboundary};
@@ -30,4 +32,4 @@ pub use sheaf::{
     pack_page_sheaf_morphisms, unpack_page_sheaf_morphism, EdgeStalk, SheafRestrictionMap,
     VertexStalk, DEFAULT_STALK_DIM, MAX_NEIGHBORS_PER_PAGE, PACKED_RESTRICTION_BYTES,
 };
-pub use speculative_prefetch::SpeculativeLookaheadPipeline;
+pub use speculative_prefetch::{PrefetchReport, SpeculativeLookaheadPipeline};

@@ -18,7 +18,10 @@ use aether_autotune::churn_controller::AutonomousChurnCoordinator;
 use aether_autotune::dma_compaction::{DmaCompactionEngine, DmaPageDescriptor};
 use aether_autotune::ricci_flow::{EdgeCurvature, RicciFlowConfig, RicciFlowOptimizer};
 use aether_autotune::sheaf_opt::SheafMorphismOptimizer;
-use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard};
+use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard, TrackingAllocator};
+
+#[global_allocator]
+static ALLOC: TrackingAllocator = TrackingAllocator::new(std::alloc::System);
 use aether_core::page::TensorGraphPage;
 use aether_manifold::product::{product_manifold_distance, HyperbolicSpec, ProductManifoldConfig};
 use aether_query::compiler::{FrontierNode, QueryPlan, SemiringSpMvEngine, MAX_QUERY_FRONTIER};

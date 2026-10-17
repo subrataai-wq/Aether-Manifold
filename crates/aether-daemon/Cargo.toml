@@ -1,0 +1,23 @@
+[package]
+name = "aetherd"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "aetherd"
+path = "src/main.rs"
+
+[dependencies]
+aether-core = { workspace = true }
+aether-manifold = { workspace = true }
+aether-storage = { workspace = true }
+aether-query = { workspace = true }
+aether-consensus = { workspace = true }
+aether-autotune = { workspace = true }
+bytemuck = { workspace = true }
+
+[lints]
+workspace = true
+

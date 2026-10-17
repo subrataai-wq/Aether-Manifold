@@ -6,11 +6,11 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+
+[dev-dependencies]
 aether-core = { workspace = true }
 static_assertions = { workspace = true }
 bytemuck = { workspace = true }
-
-[dev-dependencies]
 aether-manifold = { workspace = true }
 aether-storage = { workspace = true }
 aether-query = { workspace = true }

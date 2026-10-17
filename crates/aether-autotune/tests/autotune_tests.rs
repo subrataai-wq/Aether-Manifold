@@ -63,6 +63,77 @@ fn test_ricci_flow_forman_curvatures() {
 }
 
 #[test]
+fn test_ricci_flow_ollivier_curvatures() {
+    let config = RicciFlowConfig::default();
+    let optimizer = RicciFlowOptimizer::new(config).expect("Valid config");
+
+    // Star Graph: Center node 0 connected to 5 leaves 1..5
+    let num_vertices = 6;
+    let coord_dim = 4;
+    let coords: Vec<f32> = vec![
+        0.0, 0.0, 0.0, 0.0, // node 0 (center)
+        1.0, 0.0, 0.0, 0.0, // node 1 (leaf)
+        0.0, 1.0, 0.0, 0.0, // node 2 (leaf)
+        -1.0, 0.0, 0.0, 0.0, // node 3 (leaf)
+        0.0, -1.0, 0.0, 0.0, // node 4 (leaf)
+        0.5, 0.5, 0.0, 0.0, // node 5 (leaf)
+    ];
+    let edges = vec![(0, 1), (0, 2), (0, 3), (0, 4), (0, 5)];
+
+    let star_curvatures = optimizer
+        .compute_ollivier_curvatures(num_vertices, &coords, coord_dim, &edges)
+        .expect("Ollivier curvatures computed for star graph");
+
+    assert_eq!(star_curvatures.len(), 5);
+    for edge in &star_curvatures {
+        assert_eq!(edge.forman_curvature, -2.0);
+        assert!(!edge.ollivier_curvature.is_nan());
+    }
+
+    // Clique Graph (K_3 Triangle): Nodes 0, 1, 2
+    let tri_coords: Vec<f32> = vec![
+        0.0, 0.0, 0.0, 0.0, // node 0
+        1.0, 0.0, 0.0, 0.0, // node 1
+        0.5, 0.866, 0.0, 0.0, // node 2
+    ];
+    let tri_edges = vec![(0, 1), (1, 2), (2, 0)];
+    let tri_curvatures = optimizer
+        .compute_ollivier_curvatures(3, &tri_coords, coord_dim, &tri_edges)
+        .expect("Ollivier curvatures computed for triangle graph");
+
+    assert_eq!(tri_curvatures.len(), 3);
+    for edge in &tri_curvatures {
+        // Triangle has higher Ollivier curvature than branching star graph
+        assert!(
+            edge.ollivier_curvature > star_curvatures[0].ollivier_curvature,
+            "Triangle curvature ({}) must exceed tree curvature ({})",
+            edge.ollivier_curvature,
+            star_curvatures[0].ollivier_curvature
+        );
+    }
+
+    // Zero-allocation hot path test under HotPathAllocGuard
+    reset_hot_path_counters();
+    let mut ws = vec![0.0f32; 32768];
+    let mut out_curvatures = [aether_autotune::ricci_flow::EdgeCurvature::new(0, 0, 0.0, 0.0); 5];
+
+    let guard = HotPathAllocGuard::enter();
+    let count = optimizer
+        .compute_ollivier_curvatures_with_workspace(
+            num_vertices,
+            &coords,
+            coord_dim,
+            &edges,
+            &mut out_curvatures,
+            &mut ws,
+        )
+        .expect("Zero-alloc Ollivier evaluation succeeded");
+    core::mem::drop(guard);
+
+    assert_eq!(count, 5);
+}
+
+#[test]
 fn test_curvature_evolution_bounds() {
     let config = RicciFlowConfig {
         learning_rate_kappa: 0.5,

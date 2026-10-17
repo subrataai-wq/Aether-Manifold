@@ -203,10 +203,92 @@ impl DmaCompactionEngine {
         self.busy.store(false, Ordering::Release);
         Ok(telemetry)
     }
+
+    /// Executes a batch of page transfers through an explicit hardware DMA offload backend.
+    ///
+    /// Enables injecting CUDA/cuFile, SPDK, or io_uring hardware DMA engines with strictly
+    /// zero hot-path heap allocations (AGENTS.md Rule 3.1 & Rule 3.3).
+    pub fn execute_batch_with_backend<B: DmaOffloadBackend>(
+        &self,
+        backend: &mut B,
+        descriptors: &[DmaPageDescriptor],
+        src_pages: &[TensorGraphPage],
+        dst_pages: &mut [TensorGraphPage],
+    ) -> Result<usize, AetherError> {
+        let _batch_id = self.batch_counter.fetch_add(1, Ordering::Relaxed);
+        self.busy.store(true, Ordering::Release);
+        let res = backend.submit_dma_batch(descriptors, src_pages, dst_pages);
+        self.busy.store(false, Ordering::Release);
+        res
+    }
 }
 
 impl Default for DmaCompactionEngine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Zero-allocation hardware offload trait for asynchronous Direct Memory Access (DMA) compaction.
+pub trait DmaOffloadBackend {
+    /// Submits a batch of DMA page transfers across source and destination page buffers.
+    ///
+    /// Returns the number of successfully transferred pages.
+    fn submit_dma_batch(
+        &mut self,
+        descriptors: &[DmaPageDescriptor],
+        src_pages: &[TensorGraphPage],
+        dst_pages: &mut [TensorGraphPage],
+    ) -> Result<usize, AetherError>;
+}
+
+/// Default host-loopback DMA driver executing memory transfers directly on CPU memory bus.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HostLoopbackDmaBackend;
+
+impl HostLoopbackDmaBackend {
+    /// Creates a new `HostLoopbackDmaBackend`.
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl DmaOffloadBackend for HostLoopbackDmaBackend {
+    fn submit_dma_batch(
+        &mut self,
+        descriptors: &[DmaPageDescriptor],
+        src_pages: &[TensorGraphPage],
+        dst_pages: &mut [TensorGraphPage],
+    ) -> Result<usize, AetherError> {
+        let mut transferred = 0usize;
+        for desc in descriptors {
+            desc.verify_crc()?;
+
+            let src_idx = desc.source_offset as usize;
+            let dst_idx = desc.dest_offset as usize;
+
+            let src_page = src_pages.get(src_idx).ok_or(AetherError::OutOfBounds {
+                index: src_idx,
+                limit: src_pages.len(),
+            })?;
+
+            let dst_len = dst_pages.len();
+            let dst_page = dst_pages.get_mut(dst_idx).ok_or(AetherError::OutOfBounds {
+                index: dst_idx,
+                limit: dst_len,
+            })?;
+
+            // Zero-copy 4KB NVMe-aligned page transfer
+            let src_bytes: &[u8; 4096] = src_page.as_aligned_bytes();
+            let dst_bytes: &mut [u8; 4096] = dst_page.as_aligned_bytes_mut();
+            dst_bytes.copy_from_slice(src_bytes);
+
+            // Update destination page ID and update header checksum
+            dst_page.header.page_id = desc.dest_page_id;
+            dst_page.header.update_checksum();
+
+            transferred = transferred.saturating_add(1);
+        }
+        Ok(transferred)
     }
 }

@@ -18,6 +18,9 @@ pub type ReplicationRingBuffer<const N: usize> = SpscRingBuffer<ReplicationMessa
 /// Maximum concurrent in-flight proposals tracked in pre-allocated ring buffer.
 pub const MAX_IN_FLIGHT_PROPOSALS: usize = 1024;
 
+/// Maximum cluster nodes supported without modulo bitmask collision (256-bit quorum mask).
+pub const MAX_CLUSTER_NODES: u16 = 256;
+
 /// Message types for replication and quorum coordination.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -227,7 +230,7 @@ struct InFlightSlot {
     sequence_number: u64,
     hlc_timestamp: u64,
     vertex_id: u64,
-    ack_mask: u64,
+    ack_mask: [u64; 4],
     nack_count: usize,
     committed: bool,
     payload: [u8; 24],
@@ -240,7 +243,7 @@ impl InFlightSlot {
             sequence_number: 0,
             hlc_timestamp: 0,
             vertex_id: 0,
-            ack_mask: 0,
+            ack_mask: [0u64; 4],
             nack_count: 0,
             committed: false,
             payload: [0u8; 24],
@@ -305,6 +308,12 @@ impl LeaderlessQuorumEngine {
         payload: [u8; 24],
         physical_now_micros: u64,
     ) -> Result<ReplicationMessage, AetherError> {
+        if self.config.node_id >= MAX_CLUSTER_NODES as u64 {
+            return Err(AetherError::InvalidNodeId {
+                node_id: self.config.node_id,
+            });
+        }
+
         let ts = self.tick(physical_now_micros);
         let seq = self.next_sequence;
         self.next_sequence = self.next_sequence.saturating_add(1);
@@ -315,9 +324,13 @@ impl LeaderlessQuorumEngine {
             slot.sequence_number = seq;
             slot.hlc_timestamp = ts.as_u64();
             slot.vertex_id = vertex_id;
-            // Record self acknowledgment (own node)
-            let self_bit = 1u64 << (self.config.node_id % 64);
-            slot.ack_mask = self_bit;
+            // Record self acknowledgment (own node) across 256-bit mask
+            let word_idx = (self.config.node_id / 64) as usize;
+            let bit_mask = 1u64 << (self.config.node_id % 64);
+            slot.ack_mask = [0u64; 4];
+            if let Some(word) = slot.ack_mask.get_mut(word_idx) {
+                *word |= bit_mask;
+            }
             slot.nack_count = 0;
             slot.committed = false;
             slot.payload = payload;
@@ -335,6 +348,17 @@ impl LeaderlessQuorumEngine {
         );
         msg.update_crc();
         Ok(msg)
+    }
+
+    /// Alias for `propose` with explicit morphism replication terminology.
+    #[inline]
+    pub fn propose_morphism(
+        &mut self,
+        vertex_id: u64,
+        payload: [u8; 24],
+        physical_now_micros: u64,
+    ) -> Result<ReplicationMessage, AetherError> {
+        self.propose(vertex_id, payload, physical_now_micros)
     }
 
     /// Processes an incoming remote `Propose` message on a replica node.
@@ -381,12 +405,21 @@ impl LeaderlessQuorumEngine {
     ) -> Result<Option<ReplicationMessage>, AetherError> {
         ack_msg.verify_crc()?;
 
+        if ack_msg.node_id >= MAX_CLUSTER_NODES as u64 {
+            return Err(AetherError::InvalidNodeId {
+                node_id: ack_msg.node_id,
+            });
+        }
+
         let slot_idx = (ack_msg.sequence_number as usize) % MAX_IN_FLIGHT_PROPOSALS;
         let (should_commit, hlc_ts, vertex_id, payload) = match self.in_flight.get_mut(slot_idx) {
             Some(slot) if slot.active && slot.sequence_number == ack_msg.sequence_number => {
-                let peer_bit = 1u64 << (ack_msg.node_id % 64);
-                slot.ack_mask |= peer_bit;
-                let ack_count = slot.ack_mask.count_ones() as usize;
+                let word_idx = (ack_msg.node_id / 64) as usize;
+                let bit_mask = 1u64 << (ack_msg.node_id % 64);
+                if let Some(word) = slot.ack_mask.get_mut(word_idx) {
+                    *word |= bit_mask;
+                }
+                let ack_count: usize = slot.ack_mask.iter().map(|w| w.count_ones() as usize).sum();
 
                 if ack_count >= self.config.write_quorum && !slot.committed {
                     slot.committed = true;
@@ -414,6 +447,15 @@ impl LeaderlessQuorumEngine {
         } else {
             Ok(None)
         }
+    }
+
+    /// Alias for `handle_ack` with remote acknowledgment terminology.
+    #[inline]
+    pub fn handle_remote_ack(
+        &mut self,
+        ack_msg: &ReplicationMessage,
+    ) -> Result<Option<ReplicationMessage>, AetherError> {
+        self.handle_ack(ack_msg)
     }
 
     /// Evaluates consistent quorum read across collected replica responses.

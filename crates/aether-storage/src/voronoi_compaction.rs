@@ -156,15 +156,30 @@ pub fn relink_boundary_vertex_delaunay<const D: usize>(
 
     let active_count = (page_u.header.active_vertex_count as usize).min(64);
 
-    // 1. Retain existing neighbors from page_u
+    // 1. Retain existing neighbors from page_u, decoding actual radial norms
     for i in 0..active_count {
         let nid = page_u.neighbor_ids.get(i).copied().unwrap_or(0);
         if nid != 0 && count < MAX_CANDIDATES {
+            let offset = i * 32;
+            let dist = if let Some(bytes) = page_u.quantized_neighbors.get(offset..offset + 4) {
+                let mut arr = [0u8; 4];
+                arr.copy_from_slice(bytes);
+                let norm_sq = f32::from_le_bytes(arr);
+                let d = norm_sq.max(0.0).sqrt();
+                if d > 0.0 {
+                    d
+                } else {
+                    1.0
+                }
+            } else {
+                1.0
+            };
+
             if let Some(id_slot) = candidate_ids.get_mut(count) {
                 *id_slot = nid;
             }
             if let Some(dist_slot) = candidate_dists.get_mut(count) {
-                *dist_slot = 1.0;
+                *dist_slot = dist;
             }
             count += 1;
         }
@@ -209,8 +224,16 @@ pub fn relink_boundary_vertex_delaunay<const D: usize>(
         candidate_ids.swap(i, min_idx);
         candidate_dists.swap(i, min_idx);
 
+        let selected_id = candidate_ids.get(i).copied().unwrap_or(0);
+        let selected_dist = candidate_dists.get(i).copied().unwrap_or(1.0);
+
         if let Some(slot) = page_u.neighbor_ids.get_mut(i) {
-            *slot = candidate_ids.get(i).copied().unwrap_or(0);
+            *slot = selected_id;
+        }
+        let offset = i * 32;
+        if let Some(bytes) = page_u.quantized_neighbors.get_mut(offset..offset + 4) {
+            let norm_sq = selected_dist * selected_dist;
+            bytes.copy_from_slice(&norm_sq.to_le_bytes());
         }
     }
 
