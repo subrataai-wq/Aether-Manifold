@@ -235,6 +235,40 @@ impl<const D: usize> SheafRestrictionMap<D> {
     }
 }
 
+impl VertexStalk<DEFAULT_STALK_DIM> {
+    /// Reconstruct an 8-dim neighbor stalk from co-located 32B `CompactNeighborCode` bytes.
+    ///
+    /// # Invariants
+    /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
+    #[inline]
+    pub fn from_neighbor_bytes(bytes: &[u8; 32], primary_stalk: &Self) -> Self {
+        let mut components = [0.0f32; DEFAULT_STALK_DIM];
+        let scale_bytes: [u8; 4] = match bytes.get(4..8) {
+            Some(s) => s.try_into().unwrap_or([0u8; 4]),
+            None => [0u8; 4],
+        };
+        let scale = f32::from_le_bytes(scale_bytes);
+        let safe_scale = if scale.is_finite() && scale > 1e-6 {
+            scale
+        } else {
+            1.0
+        };
+
+        for (i, comp) in components.iter_mut().enumerate() {
+            let code_byte = bytes.get(8 + i).copied().unwrap_or(0);
+            let delta = ((code_byte as f32) / 127.5 - 1.0) * safe_scale * 0.1;
+            let base = primary_stalk.components.get(i).copied().unwrap_or(0.0);
+            *comp = base + delta;
+        }
+        Self { components }
+    }
+}
+
+/// Byte offset where primary vertex stalk starts in `TensorGraphPage::sheaf_edge_weights` (1024 bytes).
+pub const SHEAF_PRIMARY_STALK_OFFSET: usize = MAX_NEIGHBORS_PER_PAGE * PACKED_RESTRICTION_BYTES;
+/// Byte offset where scalar attenuation edge weights start in `TensorGraphPage::sheaf_edge_weights` (1056 bytes).
+pub const SHEAF_WEIGHTS_OFFSET: usize = 1056;
+
 /// Helper to serialize all 64 neighbor restriction maps into `TensorGraphPage::sheaf_edge_weights`.
 pub fn pack_page_sheaf_morphisms(
     page: &mut TensorGraphPage,
@@ -251,14 +285,14 @@ pub fn pack_page_sheaf_morphisms(
         }
     }
 
-    // Pack scalar edge weights into remaining 192 bytes (64 x 2B BF16 = 128B)
-    let weights_start = MAX_NEIGHBORS_PER_PAGE * PACKED_RESTRICTION_BYTES; // 1024 bytes
+    // Pack scalar edge weights into bytes 1056..1184 (64 x 2B BF16 = 128B),
+    // reserving bytes 1024..1056 (32B) for the primary vertex stalk.
     for (idx, weight) in scalar_weights
         .iter()
         .take(MAX_NEIGHBORS_PER_PAGE)
         .enumerate()
     {
-        let offset = weights_start + idx * 2;
+        let offset = SHEAF_WEIGHTS_OFFSET + idx * 2;
         let end = offset + 2;
         if let Some(slot) = page.sheaf_edge_weights.get_mut(offset..end) {
             let bf = bf16::from_f32(*weight);
@@ -293,9 +327,8 @@ pub fn unpack_page_sheaf_morphism(
         }
     };
 
-    // Read scalar weight for attenuation
-    let weights_start = MAX_NEIGHBORS_PER_PAGE * PACKED_RESTRICTION_BYTES;
-    let w_offset = weights_start + neighbor_idx * 2;
+    // Read scalar weight for attenuation from SHEAF_WEIGHTS_OFFSET (1056)
+    let w_offset = SHEAF_WEIGHTS_OFFSET + neighbor_idx * 2;
     let attenuation = match page.sheaf_edge_weights.get(w_offset..w_offset + 2) {
         Some(bytes) => {
             let arr: [u8; 2] = bytes.try_into().unwrap_or_default();

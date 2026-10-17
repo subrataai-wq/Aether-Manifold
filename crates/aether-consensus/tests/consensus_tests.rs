@@ -326,7 +326,7 @@ fn test_spectral_geodesic_partitioner() {
 fn test_rdma_fabric_zero_copy_and_faults() {
     let mut fabric = RdmaFabric::new();
 
-    let mut window0 = RdmaMemoryWindow::with_capacity(4);
+    let window0 = RdmaMemoryWindow::with_capacity(4);
     let mut test_page = [0u8; 4096];
     test_page[0..4].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
     assert!(window0.write_page(0, &test_page).is_ok());

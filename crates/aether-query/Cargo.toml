@@ -8,11 +8,8 @@ license.workspace = true
 [dependencies]
 aether-core = { workspace = true }
 aether-manifold = { workspace = true }
-aether-storage = { workspace = true }
-bumpalo = { workspace = true }
 dyn-stack = { workspace = true }
 pulp = { workspace = true }
-faer-core = { workspace = true }
 static_assertions = { workspace = true }
 half = { workspace = true }
 libm = { workspace = true }

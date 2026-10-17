@@ -134,15 +134,38 @@ impl SemiringSpMvEngine {
                     _ => continue,
                 };
 
+                // Read primary vertex stalk x_u from page
+                let primary_stalk =
+                    crate::sheaf::VertexStalk::<DEFAULT_STALK_DIM>::new(page.primary_stalk());
+
                 // Read restriction map from 4KB page
-                let morphism = unpack_page_sheaf_morphism(page, neighbor_idx)?;
-                let dummy_stalk = crate::sheaf::VertexStalk::<DEFAULT_STALK_DIM>::default();
-                let dummy_other = crate::sheaf::VertexStalk::<DEFAULT_STALK_DIM>::default();
+                let morphism_u = unpack_page_sheaf_morphism(page, neighbor_idx)?;
+
+                // Reconstruct neighbor stalk x_v from neighbor's page if available, or from co-located 32B code
+                let neighbor_stalk = if let Some(n_page) = page_lookup(neighbor_id) {
+                    crate::sheaf::VertexStalk::<DEFAULT_STALK_DIM>::new(n_page.primary_stalk())
+                } else {
+                    let offset = neighbor_idx * 32;
+                    let code_bytes: [u8; 32] =
+                        match page.quantized_neighbors.get(offset..offset + 32) {
+                            Some(slice) => slice.try_into().unwrap_or([0u8; 32]),
+                            None => [0u8; 32],
+                        };
+                    crate::sheaf::VertexStalk::<DEFAULT_STALK_DIM>::from_neighbor_bytes(
+                        &code_bytes,
+                        &primary_stalk,
+                    )
+                };
+
+                // Dual morphism across edge relation
+                let morphism_v = morphism_u;
+
+                // Evaluate real Sheaf Dirichlet energy: || F_{u<=e} x_u - F_{v<=e} x_v ||_2^2
                 let sheaf_energy = crate::laplacian::SheafCoboundary::edge_dirichlet_energy(
-                    &morphism,
-                    &dummy_stalk,
-                    &morphism,
-                    &dummy_other,
+                    &morphism_u,
+                    &primary_stalk,
+                    &morphism_v,
+                    &neighbor_stalk,
                 );
 
                 // Geodesic distance from neighbor to query target

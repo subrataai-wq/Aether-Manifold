@@ -204,4 +204,39 @@ impl TensorGraphPage {
         let page_mut = unsafe { &mut *page_ptr };
         Ok(page_mut)
     }
+
+    /// Extract primary vertex stalk $x_u \in \mathbb{R}^8$ from bytes 1024..1056 of `sheaf_edge_weights`.
+    ///
+    /// # Invariants
+    /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
+    #[inline]
+    pub fn primary_stalk(&self) -> [f32; 8] {
+        let mut stalk = [0.0f32; 8];
+        if let Some(bytes) = self.sheaf_edge_weights.get(1024..1056) {
+            let (chunks, _) = bytes.as_chunks::<4>();
+            for (i, chunk) in chunks.iter().enumerate() {
+                if let Some(slot) = stalk.get_mut(i) {
+                    *slot = f32::from_le_bytes(*chunk);
+                }
+            }
+        }
+        stalk
+    }
+
+    /// Write primary vertex stalk $x_u \in \mathbb{R}^8$ into bytes 1024..1056 of `sheaf_edge_weights`.
+    ///
+    /// # Invariants
+    /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
+    #[inline]
+    pub fn set_primary_stalk(&mut self, stalk: &[f32; 8]) {
+        if let Some(bytes) = self.sheaf_edge_weights.get_mut(1024..1056) {
+            for (i, val) in stalk.iter().enumerate() {
+                let le = val.to_le_bytes();
+                let offset = i * 4;
+                if let Some(slot) = bytes.get_mut(offset..offset + 4) {
+                    slot.copy_from_slice(&le);
+                }
+            }
+        }
+    }
 }

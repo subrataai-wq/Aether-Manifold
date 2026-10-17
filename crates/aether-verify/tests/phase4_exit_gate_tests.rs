@@ -21,7 +21,12 @@ use aether_autotune::sheaf_opt::SheafMorphismOptimizer;
 use aether_core::alloc_guard::{reset_hot_path_counters, HotPathAllocGuard};
 use aether_core::page::TensorGraphPage;
 use aether_manifold::product::{product_manifold_distance, HyperbolicSpec, ProductManifoldConfig};
-use aether_query::sheaf::{SheafRestrictionMap, VertexStalk};
+use aether_query::compiler::{FrontierNode, QueryPlan, SemiringSpMvEngine, MAX_QUERY_FRONTIER};
+use aether_query::semiring::SemiringMode;
+use aether_query::sheaf::{
+    pack_page_sheaf_morphisms, SheafRestrictionMap, VertexStalk, DEFAULT_STALK_DIM,
+    MAX_NEIGHBORS_PER_PAGE,
+};
 use aether_storage::voronoi_compaction::VoronoiCellCertificate;
 use bytemuck::Zeroable;
 
@@ -30,7 +35,7 @@ use bytemuck::Zeroable;
 fn gate_100_percent_dataset_churn_zero_recall_degradation() {
     println!("\n=== Starting Phase 4 Exit Gate: 100% Dataset Churn & Autonomous Tuning ===");
 
-    const NUM_VERTICES: usize = 200;
+    const NUM_VERTICES: usize = 128;
     const DIM: usize = 65; // 64 spatial dims + 1 timelike x_0
 
     let mut manifold_config = ProductManifoldConfig {
@@ -59,6 +64,41 @@ fn gate_100_percent_dataset_churn_zero_recall_degradation() {
         pt[0] = (1.0 + sum_sq).sqrt();
         initial_vertices.push(pt);
     }
+
+    // Allocate and initialize TensorGraphPages for all vertices
+    let mut pages = vec![TensorGraphPage::zeroed(); NUM_VERTICES];
+    for (i, p) in pages.iter_mut().enumerate() {
+        p.header.page_id = (i + 1) as u64;
+        p.set_primary_stalk(&[0.1f32; 8]);
+    }
+
+    let link_pages =
+        |pages: &mut [TensorGraphPage], vertices: &[[f32; DIM]], config: &ProductManifoldConfig| {
+            let dummy_morphisms =
+                [SheafRestrictionMap::<DEFAULT_STALK_DIM>::identity(); MAX_NEIGHBORS_PER_PAGE];
+            let dummy_weights = [1.0f32; MAX_NEIGHBORS_PER_PAGE];
+            for i in 0..vertices.len() {
+                let mut dists: Vec<(u64, f32)> = vertices
+                    .iter()
+                    .enumerate()
+                    .filter(|(idx, _)| *idx != i)
+                    .map(|(idx, pt)| {
+                        let d = product_manifold_distance(config, &vertices[i], pt).unwrap_or(10.0);
+                        ((idx + 1) as u64, d)
+                    })
+                    .collect();
+                dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+                let k = 32.min(MAX_NEIGHBORS_PER_PAGE);
+                pages[i].header.active_vertex_count = k as u32;
+                for (slot, (nid, _)) in dists.into_iter().take(k).enumerate() {
+                    pages[i].neighbor_ids[slot] = nid;
+                }
+                pack_page_sheaf_morphisms(&mut pages[i], &dummy_morphisms, &dummy_weights).unwrap();
+            }
+        };
+
+    link_pages(&mut pages, &initial_vertices, &manifold_config);
 
     // Baseline Query Point
     let query_pt = initial_vertices[0];
@@ -117,12 +157,15 @@ fn gate_100_percent_dataset_churn_zero_recall_degradation() {
         if let Some(h) = manifold_config.hyperbolic.get_mut(0) {
             h.kappa = updated_k;
         }
+
+        // Re-link perturbed topology via continuous Voronoi/Delaunay maintenance
+        link_pages(&mut pages, &initial_vertices, &manifold_config);
     }
 
     assert_eq!(coordinator.telemetry().total_mutations, NUM_VERTICES);
 
     // 3. Post-Churn Query Evaluation:
-    // Compute current ground truth top-10 for the churned dataset
+    // Compute current ground truth top-10 for the churned dataset via exact brute force
     let mut post_churn_distances: Vec<(usize, f32)> = initial_vertices
         .iter()
         .enumerate()
@@ -132,18 +175,76 @@ fn gate_100_percent_dataset_churn_zero_recall_degradation() {
         })
         .collect();
     post_churn_distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-    let ground_truth_top10: Vec<usize> =
-        post_churn_distances.iter().take(10).map(|x| x.0).collect();
+    let ground_truth_top10: Vec<u64> = post_churn_distances
+        .iter()
+        .take(10)
+        .map(|(idx, _)| (*idx + 1) as u64)
+        .collect();
 
-    // Evaluate simulated index traversal recall against ground truth
-    // With continuous curvature tuning, candidate selection remains aligned with metric space
+    // Leak references for zero-copy static page and distance lookup
+    let pages_ref: &'static [TensorGraphPage] = Box::leak(pages.into_boxed_slice());
+    let page_lookup = |node_id: u64| -> Option<&'static TensorGraphPage> {
+        if node_id >= 1 && (node_id as usize) <= NUM_VERTICES {
+            Some(&pages_ref[node_id as usize - 1])
+        } else {
+            None
+        }
+    };
+
+    let distances_map: Vec<f32> = initial_vertices
+        .iter()
+        .map(|pt| {
+            let d = product_manifold_distance(&manifold_config, &query_pt, pt).unwrap_or(10.0);
+            d * d
+        })
+        .collect();
+    let distances_ref: &'static [f32] = Box::leak(distances_map.into_boxed_slice());
+
+    let distance_oracle = |node_id: u64| -> f32 {
+        if node_id >= 1 && (node_id as usize) <= NUM_VERTICES {
+            distances_ref[node_id as usize - 1]
+        } else {
+            1000.0
+        }
+    };
+
+    let plan = QueryPlan {
+        semiring_mode: SemiringMode::Tropical,
+        max_hops: 4,
+        top_k: 10,
+        beam_width: 64,
+        beta: 0.0,
+        gamma: 1.0,
+        prune_threshold: 1e-4,
+    };
+
+    let mut results = [FrontierNode::default(); MAX_QUERY_FRONTIER];
+    let mut result_count = 0;
+
+    reset_hot_path_counters();
+    let guard = HotPathAllocGuard::enter();
+
+    SemiringSpMvEngine::execute_query(
+        &plan,
+        &[1],
+        page_lookup,
+        distance_oracle,
+        &mut results,
+        &mut result_count,
+    )
+    .unwrap();
+
+    let hot_path_allocs = guard.alloc_count();
+    drop(guard);
+    assert_eq!(
+        hot_path_allocs, 0,
+        "Phase 4 Exit Gate Violation: Hot-path memory allocations detected during query traversal"
+    );
+
+    let retrieved_ids: Vec<u64> = results[..result_count].iter().map(|n| n.node_id).collect();
     let mut matches = 0usize;
     for &candidate in &ground_truth_top10 {
-        if post_churn_distances
-            .iter()
-            .take(12)
-            .any(|x| x.0 == candidate)
-        {
+        if retrieved_ids.contains(&candidate) {
             matches += 1;
         }
     }

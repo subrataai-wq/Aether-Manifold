@@ -48,6 +48,7 @@ pub struct CoreShardRuntime<const D: usize, const L0_CAP: usize, const IO_DEPTH:
     pub l0_log: L0MorphismLog<D, L0_CAP>,
     pub sq: SpscRingBuffer<IoSubmissionSqe, IO_DEPTH>,
     pub cq: SpscRingBuffer<IoCompletionCqe, IO_DEPTH>,
+    pub io_driver: crate::io_driver::FileDirectDriver,
 }
 
 impl<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize>
@@ -62,6 +63,7 @@ impl<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize>
             l0_log: L0MorphismLog::new(),
             sq: SpscRingBuffer::new(),
             cq: SpscRingBuffer::new(),
+            io_driver: crate::io_driver::FileDirectDriver::memory_only(),
         }
     }
 
@@ -125,8 +127,7 @@ impl<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize>
 
     /// Process and advance pending direct I/O submissions.
     ///
-    /// On Linux, submits to kernel `io_uring` ring buffer. On Windows/macOS,
-    /// performs deterministic zero-copy memory DMA transfers to/from the arena.
+    /// Routes requests through `io_driver` with strictly zero hot-path heap allocations.
     ///
     /// # Hard Invariants
     /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
@@ -134,11 +135,21 @@ impl<const D: usize, const L0_CAP: usize, const IO_DEPTH: usize>
         let mut processed = 0;
 
         while let Some(sqe) = self.sq.try_pop() {
-            // Verify slot is within bounds of shard arena
             let result = if sqe.arena_slot < self.arena.capacity() {
-                // In production, Linux io_uring DMA reads/writes the 4096 bytes directly
-                // to/from the aligned NVMe block device.
-                4096i32
+                if let Ok(page) = self.arena.get_page_mut(sqe.arena_slot) {
+                    match sqe.opcode {
+                        IoOpcode::ReadPage => match self.io_driver.read_page(sqe.page_id, page) {
+                            Ok(bytes) => bytes as i32,
+                            Err(_) => -1i32,
+                        },
+                        IoOpcode::WritePage => match self.io_driver.write_page(sqe.page_id, page) {
+                            Ok(bytes) => bytes as i32,
+                            Err(_) => -1i32,
+                        },
+                    }
+                } else {
+                    -1i32
+                }
             } else {
                 -1i32
             };

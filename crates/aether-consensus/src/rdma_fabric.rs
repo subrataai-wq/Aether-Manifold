@@ -2,10 +2,11 @@
 //!
 //! Provides an asynchronous, one-sided zero-copy remote page transfer abstraction
 //! simulating RDMA RoCEv2 and CXL 3.0 Type-3 shared memory fabrics with configurable
-//! latency and deterministic fault injection. Strictly zero heap allocations on the
-//! transfer hot path (AGENTS.md Rule 3.1).
+//! latency and deterministic fault injection. Strictly zero heap allocations and
+//! zero OS locks on the transfer hot path (AGENTS.md Rule 3.1 & Rule 3.2).
 
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::cell::UnsafeCell;
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use aether_core::error::AetherError;
@@ -14,49 +15,110 @@ use aether_core::page::TensorGraphPage;
 /// Maximum number of cluster nodes supported by the virtual RDMA fabric.
 pub const MAX_RDMA_NODES: usize = 64;
 
+/// 64-byte cache-line aligned lock-free page slot with optimistic SeqLock (Rule 3.2).
+#[repr(C, align(64))]
+pub struct LockFreeRdmaSlot {
+    seq_version: AtomicU64,
+    page: UnsafeCell<TensorGraphPage>,
+}
+
+unsafe impl Sync for LockFreeRdmaSlot {}
+unsafe impl Send for LockFreeRdmaSlot {}
+
+impl LockFreeRdmaSlot {
+    /// Creates a new zeroed lock-free page slot.
+    pub fn new() -> Self {
+        Self {
+            seq_version: AtomicU64::new(0),
+            page: UnsafeCell::new(bytemuck::Zeroable::zeroed()),
+        }
+    }
+
+    /// Single-writer lock-free page write into the slot.
+    #[inline]
+    pub fn write_page(&self, src: &[u8; 4096]) {
+        let v = self.seq_version.fetch_add(1, Ordering::Acquire);
+        unsafe {
+            let page_ptr = self.page.get() as *mut u8;
+            core::ptr::copy_nonoverlapping(src.as_ptr(), page_ptr, 4096);
+        }
+        self.seq_version.store(v.wrapping_add(2), Ordering::Release);
+    }
+
+    /// Optimistic lock-free read into `dest`. Returns `true` if read was consistent.
+    #[inline]
+    pub fn read_page(&self, dest: &mut [u8; 4096]) -> bool {
+        for _ in 0..64 {
+            let v1 = self.seq_version.load(Ordering::Acquire);
+            if (v1 & 1) != 0 {
+                core::hint::spin_loop();
+                continue;
+            }
+
+            unsafe {
+                let page_ptr = self.page.get() as *const u8;
+                core::ptr::copy_nonoverlapping(page_ptr, dest.as_mut_ptr(), 4096);
+            }
+
+            core::sync::atomic::fence(Ordering::Acquire);
+            let v2 = self.seq_version.load(Ordering::Relaxed);
+            if v1 == v2 {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+impl Default for LockFreeRdmaSlot {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Memory region representing an exported 4KB-page aligned memory window on a node.
 pub struct RdmaMemoryWindow {
-    pages: Vec<TensorGraphPage>,
+    slots: Vec<LockFreeRdmaSlot>,
 }
 
 impl RdmaMemoryWindow {
     /// Creates a pre-allocated memory window capable of hosting `num_pages` 4KB pages.
     pub fn with_capacity(num_pages: usize) -> Self {
-        let pages = vec![bytemuck::Zeroable::zeroed(); num_pages];
-        Self { pages }
+        let mut slots = Vec::with_capacity(num_pages);
+        for _ in 0..num_pages {
+            slots.push(LockFreeRdmaSlot::new());
+        }
+        Self { slots }
     }
 
     /// Number of pages hosted in this memory window.
     #[inline]
     pub fn num_pages(&self) -> usize {
-        self.pages.len()
+        self.slots.len()
     }
 
-    /// Reads a 4KB page directly into `dest` with zero heap allocation.
+    /// Reads a 4KB page directly into `dest` with zero heap allocation and zero OS locks.
     #[inline]
     pub fn read_page(&self, page_index: usize, dest: &mut [u8; 4096]) -> Result<(), AetherError> {
-        let page = self.pages.get(page_index).ok_or(AetherError::OutOfBounds {
+        let slot = self.slots.get(page_index).ok_or(AetherError::OutOfBounds {
             index: page_index,
-            limit: self.pages.len(),
+            limit: self.slots.len(),
         })?;
-        let bytes: &[u8; 4096] = page.as_aligned_bytes();
-        dest.copy_from_slice(bytes);
-        Ok(())
+        if slot.read_page(dest) {
+            Ok(())
+        } else {
+            Err(AetherError::IoFault { code: 12 })
+        }
     }
 
-    /// Writes a 4KB page directly from `src` with zero heap allocation.
+    /// Writes a 4KB page directly from `src` with zero heap allocation and zero OS locks.
     #[inline]
-    pub fn write_page(&mut self, page_index: usize, src: &[u8; 4096]) -> Result<(), AetherError> {
-        let limit = self.pages.len();
-        let page = self
-            .pages
-            .get_mut(page_index)
-            .ok_or(AetherError::OutOfBounds {
-                index: page_index,
-                limit,
-            })?;
-        let bytes: &mut [u8; 4096] = page.as_aligned_bytes_mut();
-        bytes.copy_from_slice(src);
+    pub fn write_page(&self, page_index: usize, src: &[u8; 4096]) -> Result<(), AetherError> {
+        let slot = self.slots.get(page_index).ok_or(AetherError::OutOfBounds {
+            index: page_index,
+            limit: self.slots.len(),
+        })?;
+        slot.write_page(src);
         Ok(())
     }
 }
@@ -65,12 +127,7 @@ impl RdmaMemoryWindow {
 struct FabricNodeSlot {
     active: AtomicBool,
     online: AtomicBool,
-    window: Option<Arc<SharedWindow>>,
-}
-
-// Internal wrapper to allow lock-free/interior mutable page updates across the fabric simulation
-struct SharedWindow {
-    raw_window: std::sync::RwLock<RdmaMemoryWindow>,
+    window: Option<Arc<RdmaMemoryWindow>>,
 }
 
 /// Virtual RDMA / CXL 3.0 Fabric coordinating zero-copy 4KB page transfers.
@@ -112,9 +169,7 @@ impl RdmaFabric {
             });
         }
         if let Some(slot) = self.nodes.get_mut(idx) {
-            slot.window = Some(Arc::new(SharedWindow {
-                raw_window: std::sync::RwLock::new(window),
-            }));
+            slot.window = Some(Arc::new(window));
             slot.active.store(true, Ordering::Release);
             slot.online.store(true, Ordering::Release);
         }
@@ -130,13 +185,29 @@ impl RdmaFabric {
                 limit: MAX_RDMA_NODES,
             });
         }
-        if let Some(slot) = self.nodes.get(idx) {
-            slot.online.store(online, Ordering::Release);
-        }
+        let slot = self
+            .nodes
+            .get(idx)
+            .ok_or(AetherError::NodeUnreachable { node_id })?;
+        slot.online.store(online, Ordering::Release);
         Ok(())
     }
 
-    /// Configures synthetic packet drop rate (0.0 = 0%, 1.0 = 100%).
+    /// Checks if a node is currently online.
+    pub fn is_node_online(&self, node_id: u64) -> bool {
+        let idx = node_id as usize;
+        if idx >= MAX_RDMA_NODES {
+            return false;
+        }
+        match self.nodes.get(idx) {
+            Some(slot) => {
+                slot.active.load(Ordering::Acquire) && slot.online.load(Ordering::Acquire)
+            }
+            None => false,
+        }
+    }
+
+    /// Sets a synthetic packet drop rate in parts-per-million (e.g. 0.05 = 50,000 ppm = 5%).
     pub fn set_drop_rate(&self, drop_rate: f32) {
         let clamped = drop_rate.clamp(0.0, 1.0);
         let ppm = (clamped * 1_000_000.0) as u32;
@@ -161,10 +232,11 @@ impl RdmaFabric {
     /// Executes a one-sided zero-copy RDMA / CXL 3.0 page read.
     ///
     /// Copies 4096 bytes directly from the remote node's registered memory window
-    /// into `dest` with strictly zero hot-path heap allocations.
+    /// into `dest` with strictly zero hot-path heap allocations and zero OS locks.
     ///
     /// # Invariants
     /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
+    /// - Zero OS-level locks on the hot path (AGENTS.md Rule 3.2).
     pub fn read_remote_page(
         &self,
         target_node_id: u64,
@@ -197,21 +269,17 @@ impl RdmaFabric {
             node_id: target_node_id,
         })?;
 
-        let window = window_ref
-            .raw_window
-            .read()
-            .map_err(|_| AetherError::IoFault { code: 11 })?;
-
-        window.read_page(page_index, dest)
+        window_ref.read_page(page_index, dest)
     }
 
     /// Executes a one-sided zero-copy RDMA / CXL 3.0 page write.
     ///
     /// Copies 4096 bytes directly from `src` into the remote node's registered memory window
-    /// with strictly zero hot-path heap allocations.
+    /// with strictly zero hot-path heap allocations and zero OS locks.
     ///
     /// # Invariants
     /// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
+    /// - Zero OS-level locks on the hot path (AGENTS.md Rule 3.2).
     pub fn write_remote_page(
         &self,
         target_node_id: u64,
@@ -244,12 +312,7 @@ impl RdmaFabric {
             node_id: target_node_id,
         })?;
 
-        let mut window = window_ref
-            .raw_window
-            .write()
-            .map_err(|_| AetherError::IoFault { code: 11 })?;
-
-        window.write_page(page_index, src)
+        window_ref.write_page(page_index, src)
     }
 }
 

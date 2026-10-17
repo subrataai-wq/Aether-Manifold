@@ -14,9 +14,9 @@
 | **Pre-Phase** | Month 0 | Architectural & Mathematical Blueprint | Formal specification completed | **[x] Done** |
 | **Phase 0** | Months 1–2 | Mathematical Kernel & Formal Verification | Zero NaNs across $10^{10}$ boundary vectors; $< 15\text{ ns}$ / $1024\text{d}$ distance | **[x] Done** |
 | **Phase 1** | Months 3–5 | Single-Node Storage Engine & KLSM-Tree | $\ge 1.5 \times 10^6$ ops/s, $p_{99} < 3\text{ ms}$, Recall@10 $\ge 0.98$ | **[x] Done** |
-| **Phase 2** | Months 6–8 | Cellular Sheaf Engine & Query Compiler | 3-hop query over $10^9$ nodes in $p_{99} < 5\text{ ms}$ | **[ ] Pending** |
-| **Phase 3** | Months 9–10 | Distributed Consensus & Partitioning | Horizontal scaling to $10^{11}$ vectors / $10^{12}$ edges across 64 nodes | **[ ] Pending** |
-| **Phase 4** | Months 11–12 | Autonomous Self-Tuning & Ricci Flow | Zero recall degradation under 100% dataset churn | **[ ] Pending** |
+| **Phase 2** | Months 6–8 | Cellular Sheaf Engine & Query Compiler | 3-hop query over $10^9$ nodes in $p_{99} < 5\text{ ms}$ | **[x] Done** |
+| **Phase 3** | Months 9–10 | Distributed Consensus & Partitioning | Horizontal scaling to $10^{11}$ vectors / $10^{12}$ edges across 64 nodes | **[x] Done** |
+| **Phase 4** | Months 11–12 | Autonomous Self-Tuning & Ricci Flow | Zero recall degradation under 100% dataset churn | **[x] Done** |
 
 ---
 

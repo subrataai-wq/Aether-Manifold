@@ -387,3 +387,55 @@ fn gate_zero_hot_path_allocations_storage_engine() {
     );
     assert_eq!(guard.allocated_bytes(), 0);
 }
+
+#[test]
+fn test_boundary_delaunay_relink_and_physical_driver() {
+    use aether_core::page::TensorGraphPage;
+    use aether_storage::io_driver::FileDirectDriver;
+    use aether_storage::voronoi_compaction::relink_boundary_vertex_delaunay;
+    use bytemuck::Zeroable;
+
+    let config = ProductManifoldConfig {
+        hyperbolic: vec![],
+        spherical: vec![],
+        euclidean: Some(EuclideanSpec {
+            dim: 2,
+            weight: 1.0,
+        }),
+    };
+
+    let mut page = TensorGraphPage::zeroed();
+    page.header.page_id = 42;
+    page.header.active_vertex_count = 2;
+    page.neighbor_ids[0] = 101;
+    page.neighbor_ids[1] = 102;
+
+    let u_coords = [0.0f32, 0.0];
+    let candidate_vertices = [
+        (201u64, [0.5f32, 0.5]),
+        (202u64, [0.1f32, 0.1]),
+        (203u64, [10.0f32, 10.0]),
+    ];
+
+    reset_hot_path_counters();
+    let count = {
+        let guard = HotPathAllocGuard::enter();
+        let c = relink_boundary_vertex_delaunay(&mut page, &u_coords, &candidate_vertices, &config)
+            .unwrap();
+        assert_eq!(guard.alloc_count(), 0);
+        c
+    };
+
+    assert_eq!(count, 5); // 2 existing + 3 incoming
+                          // 202 is closest ([0.1, 0.1]), so it should be near front
+    assert_eq!(page.neighbor_ids[0], 202);
+
+    // Verify physical driver memory_only write and read roundtrip
+    let mut driver = FileDirectDriver::memory_only();
+    let written = driver.write_page(0, &page).unwrap();
+    assert_eq!(written, 4096);
+
+    let mut read_page = TensorGraphPage::zeroed();
+    let read = driver.read_page(0, &mut read_page).unwrap();
+    assert_eq!(read, 4096);
+}

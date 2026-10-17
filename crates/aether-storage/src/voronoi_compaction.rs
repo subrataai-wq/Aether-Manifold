@@ -134,3 +134,88 @@ pub fn execute_boundary_only_compaction<const D: usize>(
 
     Ok(stats)
 }
+
+/// Re-links boundary page `page_u` against incoming run boundary pages
+/// using stack-allocated scratch arrays with strictly 0 heap allocations.
+///
+/// Merges existing neighbors with incoming candidates, ranking by distance and
+/// updating `page_u.neighbor_ids` in-place.
+///
+/// # Invariants
+/// - Strictly 0 heap allocations on the hot path (AGENTS.md Rule 3.1).
+pub fn relink_boundary_vertex_delaunay<const D: usize>(
+    page_u: &mut aether_core::page::TensorGraphPage,
+    u_coords: &[f32; D],
+    candidate_vertices: &[(u64, [f32; D])],
+    config: &ProductManifoldConfig,
+) -> Result<usize, AetherError> {
+    const MAX_CANDIDATES: usize = 128;
+    let mut candidate_ids = [0u64; MAX_CANDIDATES];
+    let mut candidate_dists = [f32::INFINITY; MAX_CANDIDATES];
+    let mut count = 0usize;
+
+    let active_count = (page_u.header.active_vertex_count as usize).min(64);
+
+    // 1. Retain existing neighbors from page_u
+    for i in 0..active_count {
+        let nid = page_u.neighbor_ids.get(i).copied().unwrap_or(0);
+        if nid != 0 && count < MAX_CANDIDATES {
+            if let Some(id_slot) = candidate_ids.get_mut(count) {
+                *id_slot = nid;
+            }
+            if let Some(dist_slot) = candidate_dists.get_mut(count) {
+                *dist_slot = 1.0;
+            }
+            count += 1;
+        }
+    }
+
+    // 2. Evaluate incoming candidate vertices from the intersecting boundary
+    for &(cand_id, ref cand_coord) in candidate_vertices {
+        if cand_id == page_u.header.page_id || count >= MAX_CANDIDATES {
+            continue;
+        }
+        if candidate_ids
+            .get(..count)
+            .is_some_and(|slice| slice.contains(&cand_id))
+        {
+            continue;
+        }
+
+        let dist = product_manifold_distance(config, u_coords, cand_coord)?;
+        if let Some(id_slot) = candidate_ids.get_mut(count) {
+            *id_slot = cand_id;
+        }
+        if let Some(dist_slot) = candidate_dists.get_mut(count) {
+            *dist_slot = dist;
+        }
+        count += 1;
+    }
+
+    // 3. In-place selection sort of top-64 Delaunay neighbors
+    let limit = count.min(64);
+    for i in 0..limit {
+        let mut min_idx = i;
+        for j in (i + 1)..count {
+            let dist_j = candidate_dists.get(j).copied().unwrap_or(f32::INFINITY);
+            let dist_min = candidate_dists
+                .get(min_idx)
+                .copied()
+                .unwrap_or(f32::INFINITY);
+            if dist_j < dist_min {
+                min_idx = j;
+            }
+        }
+        candidate_ids.swap(i, min_idx);
+        candidate_dists.swap(i, min_idx);
+
+        if let Some(slot) = page_u.neighbor_ids.get_mut(i) {
+            *slot = candidate_ids.get(i).copied().unwrap_or(0);
+        }
+    }
+
+    page_u.header.active_vertex_count = limit as u32;
+    page_u.header.update_checksum();
+
+    Ok(limit)
+}
