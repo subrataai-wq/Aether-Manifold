@@ -958,24 +958,25 @@ fn test_aetherd_daemon_cli_and_tcp_server() {
         "aetherd"
     };
 
-    let mut exe_path = workspace_root
-        .join("target")
-        .join("debug")
-        .join(binary_name);
+    let target_dir = std::env::var("CARGO_TARGET_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| workspace_root.join("target"));
+
+    let is_release = !cfg!(debug_assertions);
+    let profile_subdir = if is_release { "release" } else { "debug" };
+    let exe_path = target_dir.join(profile_subdir).join(binary_name);
+
     if !exe_path.exists() {
-        let release_path = workspace_root
-            .join("target")
-            .join("release")
-            .join(binary_name);
-        if release_path.exists() {
-            exe_path = release_path;
-        } else {
-            let status = Command::new("cargo")
-                .args(["build", "-p", "aether-daemon", "--bin", "aetherd"])
-                .status()
-                .expect("Failed to build aetherd");
-            assert!(status.success());
+        let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+        let mut build_cmd = Command::new(cargo);
+        build_cmd
+            .current_dir(workspace_root)
+            .args(["build", "-p", "aetherd", "--bin", "aetherd"]);
+        if is_release {
+            build_cmd.arg("--release");
         }
+        let status = build_cmd.status().expect("Failed to build aetherd");
+        assert!(status.success());
     }
 
     // 1. Test `aetherd status`
