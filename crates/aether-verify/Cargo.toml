@@ -15,6 +15,7 @@ bytemuck = { workspace = true }
 aether-storage = { workspace = true }
 aether-query = { workspace = true }
 aether-consensus = { workspace = true }
+aether-autotune = { workspace = true }
 proptest = { workspace = true }
 loom = { workspace = true }
 oorandom = { workspace = true }

@@ -6,6 +6,7 @@ members = [
     "crates/aether-storage",
     "crates/aether-query",
     "crates/aether-consensus",
+    "crates/aether-autotune",
     "crates/aether-verify",
 ]
 
@@ -33,8 +34,6 @@ crc32fast = { version = "1.4", default-features = false }
 xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
 
 # Concurrency & Pre-allocated Arenas (Rule 3.1, 3.2)
-crossbeam-utils = { version = "0.8", default-features = false }
-portable-atomic = { version = "1.10", default-features = false }
 bumpalo = { version = "3.16", features = ["collections"] }
 
 # Error primitives
@@ -51,6 +50,7 @@ aether-manifold = { path = "crates/aether-manifold" }
 aether-storage = { path = "crates/aether-storage" }
 aether-query = { path = "crates/aether-query" }
 aether-consensus = { path = "crates/aether-consensus" }
+aether-autotune = { path = "crates/aether-autotune" }
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }

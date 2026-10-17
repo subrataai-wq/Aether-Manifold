@@ -3,6 +3,21 @@
 version = 4
 
 [[package]]
+name = "aether-autotune"
+version = "0.1.0"
+dependencies = [
+ "aether-core",
+ "aether-manifold",
+ "aether-query",
+ "aether-storage",
+ "bytemuck",
+ "crc32fast",
+ "libm",
+ "static_assertions",
+ "zerocopy",
+]
+
+[[package]]
 name = "aether-consensus"
 version = "0.1.0"
 dependencies = [
@@ -75,6 +90,7 @@ dependencies = [
 name = "aether-verify"
 version = "0.1.0"
 dependencies = [
+ "aether-autotune",
  "aether-consensus",
  "aether-core",
  "aether-manifold",
